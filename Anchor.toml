@@ -12,8 +12,11 @@ tradebridge = "3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "devnet"
+cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
 test = "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+
+[test]
+startup_wait = 10000

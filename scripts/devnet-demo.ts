@@ -281,16 +281,18 @@ async function main() {
   console.log(`   Signature: ${releaseSig}`);
   console.log(`   Explorer:  ${explorerTxUrl(releaseSig)}`);
 
-  const escrowStateAfterRelease = await program.account.tradeEscrow.fetch(escrowPda);
+  const closedEscrow = await program.account.tradeEscrow.fetchNullable(escrowPda);
+  const closedVaultInfo = await connection.getAccountInfo(escrowAta);
   const sellerFinalBal = await getAccount(connection, sellerAta);
   const buyerFinalBal = await getAccount(connection, buyerAta);
-  const vaultFinalBal = await getAccount(connection, escrowAta);
 
-  console.log(`✔ Final Escrow Status: Released`);
+  console.log(`✔ Final State: Escrow Completed & Accounts Reclaimed`);
+  console.log(`   - Escrow PDA Closed:        ${closedEscrow === null} (rent lamports refunded to buyer)`);
+  console.log(`   - Escrow Token ATA Closed:  ${closedVaultInfo === null} (rent lamports refunded to buyer)`);
   console.log(`✔ Final Balances:`);
-  console.log(`   - Seller:       ${formatUsdc(Number(sellerFinalBal.amount))} (+${formatUsdc(escrowAmount.toNumber())})`);
-  console.log(`   - Buyer:        ${formatUsdc(Number(buyerFinalBal.amount))} ($750.00 remaining)`);
-  console.log(`   - Escrow Vault: ${formatUsdc(Number(vaultFinalBal.amount))}\n`);
+  console.log(`   - Seller:                   ${formatUsdc(Number(sellerFinalBal.amount))} (+${formatUsdc(escrowAmount.toNumber())})`);
+  console.log(`   - Buyer:                    ${formatUsdc(Number(buyerFinalBal.amount))} ($750.00 remaining)`);
+  console.log(`   - Escrow Vault:             Closed (0.00 USDC)\n`);
 
   txLedger.push({
     step: "5. TradeStep C: Buyer Releases Funds to Seller",

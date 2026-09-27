@@ -45,6 +45,7 @@ pub mod tradebridge {
         let escrow = &mut ctx.accounts.escrow;
         escrow.buyer = ctx.accounts.buyer.key();
         escrow.seller = ctx.accounts.seller.key();
+        escrow.mint = ctx.accounts.mint.key();
         escrow.amount = amount;
         escrow.deadline = deadline;
         escrow.status = EscrowStatus::Created;
@@ -102,10 +103,16 @@ pub mod tradebridge {
 
     /// 3. release_funds:
     ///    - Called by the buyer once satisfied with shipment/goods.
-    ///    - Status must be `ShipmentConfirmed`.
+    ///    - Status must be `ShipmentConfirmed`. Cannot be released if disputed.
     ///    - Transfers the escrowed tokens to the seller's token account using the PDA's seeds to sign.
     pub fn release_funds(ctx: Context<ReleaseFunds>) -> Result<()> {
         let escrow = &mut ctx.accounts.escrow;
+
+        // Validation: Escrow cannot be disputed
+        require!(
+            escrow.status != EscrowStatus::Disputed,
+            TradeBridgeError::EscrowDisputed
+        );
 
         // Validation: Funds can only be released after the seller has confirmed shipment.
         require!(
@@ -119,6 +126,7 @@ pub mod tradebridge {
         let buyer_key = escrow.buyer;
         let seller_key = escrow.seller;
         let bump = escrow.bump;
+        let amount = escrow.amount;
         let signer_seeds: &[&[&[u8]]] = &[&[
             b"escrow",
             buyer_key.as_ref(),
@@ -137,16 +145,26 @@ pub mod tradebridge {
                 },
                 signer_seeds,
             ),
-            escrow.amount,
+            amount,
         )?;
 
-        // Update status to Released.
-        escrow.status = EscrowStatus::Released;
+        // Close the escrow_token_account (vault) and return rent to buyer:
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::CloseAccount {
+                    account: ctx.accounts.escrow_token_account.to_account_info(),
+                    destination: ctx.accounts.buyer.to_account_info(),
+                    authority: escrow.to_account_info(),
+                },
+                signer_seeds,
+            ),
+        )?;
 
         msg!(
-            "Funds released to seller {}. Amount = {}",
-            escrow.seller,
-            escrow.amount
+            "Funds released to seller {}. Amount = {}. Escrow and vault closed; rent reclaimed.",
+            seller_key,
+            amount
         );
 
         Ok(())
@@ -154,10 +172,16 @@ pub mod tradebridge {
 
     /// 4. refund_if_expired:
     ///    - Called by the buyer if the deadline passed without shipment confirmation.
-    ///    - Status MUST be `Created` (if shipment was confirmed, buyer cannot refund).
+    ///    - Status MUST be `Created` (if shipment was confirmed, buyer cannot refund). Cannot be refunded if disputed.
     ///    - Current on-chain timestamp must be strictly greater than the deadline.
     pub fn refund_if_expired(ctx: Context<RefundIfExpired>) -> Result<()> {
         let escrow = &mut ctx.accounts.escrow;
+
+        // Validation: Escrow cannot be disputed
+        require!(
+            escrow.status != EscrowStatus::Disputed,
+            TradeBridgeError::EscrowDisputed
+        );
 
         // Validation: Cannot refund if shipment has already been confirmed (or already released/refunded).
         require!(
@@ -176,6 +200,7 @@ pub mod tradebridge {
         let buyer_key = escrow.buyer;
         let seller_key = escrow.seller;
         let bump = escrow.bump;
+        let amount = escrow.amount;
         let signer_seeds: &[&[&[u8]]] = &[&[
             b"escrow",
             buyer_key.as_ref(),
@@ -194,16 +219,68 @@ pub mod tradebridge {
                 },
                 signer_seeds,
             ),
-            escrow.amount,
+            amount,
         )?;
 
-        // Update status to Refunded.
-        escrow.status = EscrowStatus::Refunded;
+        // Close the escrow_token_account (vault) and return rent to buyer:
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::CloseAccount {
+                    account: ctx.accounts.escrow_token_account.to_account_info(),
+                    destination: ctx.accounts.buyer.to_account_info(),
+                    authority: escrow.to_account_info(),
+                },
+                signer_seeds,
+            ),
+        )?;
 
         msg!(
-            "Escrow refunded to buyer {}. Amount = {}",
+            "Escrow refunded to buyer {}. Amount = {}. Escrow and vault closed; rent reclaimed.",
+            buyer_key,
+            amount
+        );
+
+        Ok(())
+    }
+
+    /// 5. raise_dispute:
+    ///    - Called by either the buyer OR the seller stored in the escrow.
+    ///    - Current status must be `ShipmentConfirmed`.
+    ///    - Updates status to `Disputed` and emits `DisputeRaised` event.
+    ///    - Freezes the escrow from unilateral release or refund.
+    pub fn raise_dispute(ctx: Context<RaiseDispute>) -> Result<()> {
+        let escrow = &mut ctx.accounts.escrow;
+
+        // Validation: Cannot raise dispute if already disputed.
+        require!(
+            escrow.status != EscrowStatus::Disputed,
+            TradeBridgeError::DisputeAlreadyRaised
+        );
+
+        // Validation: A dispute only makes sense after shipment is confirmed and before funds are released.
+        require!(
+            escrow.status == EscrowStatus::ShipmentConfirmed,
+            TradeBridgeError::InvalidStatusForDispute
+        );
+
+        // Transition status to Disputed
+        escrow.status = EscrowStatus::Disputed;
+
+        // Emit on-chain indexable event for off-chain indexers and arbitration systems
+        emit!(DisputeRaised {
+            escrow: escrow.key(),
+            buyer: escrow.buyer,
+            seller: escrow.seller,
+            amount: escrow.amount,
+        });
+
+        msg!(
+            "Dispute raised for escrow {}: Buyer={}, Seller={}, Signer={}",
+            escrow.key(),
             escrow.buyer,
-            escrow.amount
+            escrow.seller,
+            ctx.accounts.signer.key()
         );
 
         Ok(())
@@ -280,11 +357,13 @@ pub struct ConfirmShipment<'info> {
 #[derive(Accounts)]
 pub struct ReleaseFunds<'info> {
     /// Must be the designated buyer stored in the escrow. `has_one` validates `buyer == escrow.buyer`.
+    #[account(mut)]
     pub buyer: Signer<'info>,
 
-    /// The Escrow state PDA.
+    /// The Escrow state PDA, closed and rent returned to the buyer upon completion.
     #[account(
         mut,
+        close = buyer,
         has_one = buyer @ TradeBridgeError::UnauthorizedBuyer,
         seeds = [b"escrow", escrow.buyer.as_ref(), escrow.seller.as_ref()],
         bump = escrow.bump,
@@ -292,6 +371,9 @@ pub struct ReleaseFunds<'info> {
     pub escrow: Account<'info, TradeEscrow>,
 
     /// Token mint of the held assets.
+    #[account(
+        constraint = mint.key() == escrow.mint @ TradeBridgeError::InvalidTokenMint,
+    )]
     pub mint: Account<'info, Mint>,
 
     /// The escrow PDA's token vault holding the tokens.
@@ -317,11 +399,13 @@ pub struct ReleaseFunds<'info> {
 #[derive(Accounts)]
 pub struct RefundIfExpired<'info> {
     /// Must be the designated buyer stored in the escrow. `has_one` validates `buyer == escrow.buyer`.
+    #[account(mut)]
     pub buyer: Signer<'info>,
 
-    /// The Escrow state PDA.
+    /// The Escrow state PDA, closed and rent returned to the buyer upon refund.
     #[account(
         mut,
+        close = buyer,
         has_one = buyer @ TradeBridgeError::UnauthorizedBuyer,
         seeds = [b"escrow", escrow.buyer.as_ref(), escrow.seller.as_ref()],
         bump = escrow.bump,
@@ -329,6 +413,9 @@ pub struct RefundIfExpired<'info> {
     pub escrow: Account<'info, TradeEscrow>,
 
     /// Token mint of the held assets.
+    #[account(
+        constraint = mint.key() == escrow.mint @ TradeBridgeError::InvalidTokenMint,
+    )]
     pub mint: Account<'info, Mint>,
 
     /// The escrow PDA's token vault holding the tokens.
@@ -350,8 +437,26 @@ pub struct RefundIfExpired<'info> {
     pub token_program: Program<'info, Token>,
 }
 
+/// Context for raising a dispute on an escrow.
+#[derive(Accounts)]
+pub struct RaiseDispute<'info> {
+    /// Signer can be either the designated buyer OR the designated seller stored in the escrow.
+    #[account(
+        constraint = signer.key() == escrow.buyer || signer.key() == escrow.seller @ TradeBridgeError::UnauthorizedParty,
+    )]
+    pub signer: Signer<'info>,
+
+    /// The Escrow state PDA to transition into Disputed status.
+    #[account(
+        mut,
+        seeds = [b"escrow", escrow.buyer.as_ref(), escrow.seller.as_ref()],
+        bump = escrow.bump,
+    )]
+    pub escrow: Account<'info, TradeEscrow>,
+}
+
 // ==============================================================================
-// STATE ACCOUNT AND ENUMS
+// STATE ACCOUNT, EVENTS, AND ENUMS
 // ==============================================================================
 
 /// TradeEscrow PDA Account data structure.
@@ -363,6 +468,8 @@ pub struct TradeEscrow {
     pub buyer: Pubkey,
     /// Public key of the seller
     pub seller: Pubkey,
+    /// Token mint of the escrowed funds
+    pub mint: Pubkey,
     /// Escrowed amount in token base units
     pub amount: u64,
     /// Unix timestamp expiration deadline
@@ -387,6 +494,17 @@ pub enum EscrowStatus {
     Released,
     /// Deadline passed without shipment; funds refunded to buyer
     Refunded,
+    /// Dispute raised by buyer or seller; escrow frozen pending resolution
+    Disputed,
+}
+
+/// Event emitted when a dispute is raised for an escrow.
+#[event]
+pub struct DisputeRaised {
+    pub escrow: Pubkey,
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub amount: u64,
 }
 
 // ==============================================================================
@@ -433,4 +551,16 @@ pub enum TradeBridgeError {
 
     #[msg("The token account mint does not match the escrow token mint.")]
     InvalidTokenMint,
+
+    #[msg("Signer is not authorized: must be either the buyer or the seller.")]
+    UnauthorizedParty,
+
+    #[msg("A dispute has already been raised for this escrow.")]
+    DisputeAlreadyRaised,
+
+    #[msg("Disputes can only be raised after shipment has been confirmed and before funds are released.")]
+    InvalidStatusForDispute,
+
+    #[msg("Escrow is disputed and all funds actions are frozen pending resolution.")]
+    EscrowDisputed,
 }

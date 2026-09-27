@@ -159,6 +159,7 @@ describe("tradebridge escrow tests", () => {
     let escrowAccount = await program.account.tradeEscrow.fetch(escrowPda);
     expect(escrowAccount.buyer.toBase58()).to.equal(buyer.publicKey.toBase58());
     expect(escrowAccount.seller.toBase58()).to.equal(seller.publicKey.toBase58());
+    expect(escrowAccount.mint.toBase58()).to.equal(mint.toBase58());
     expect(escrowAccount.amount.toNumber()).to.equal(escrowAmount.toNumber());
     expect(escrowAccount.status.created).to.not.be.undefined;
 
@@ -195,17 +196,17 @@ describe("tradebridge escrow tests", () => {
       .signers([buyer])
       .rpc();
 
-    // Assert: Escrow status is Released
-    escrowAccount = await program.account.tradeEscrow.fetch(escrowPda);
-    expect(escrowAccount.status.released).to.not.be.undefined;
+    // Assert: Escrow PDA is closed and rent returned to buyer
+    const closedEscrowAccount = await program.account.tradeEscrow.fetchNullable(escrowPda);
+    expect(closedEscrowAccount).to.be.null;
+
+    // Assert: Escrow Token Account is closed
+    const closedEscrowAtaInfo = await provider.connection.getAccountInfo(escrowAta);
+    expect(closedEscrowAtaInfo).to.be.null;
 
     // Assert: Seller's token balance increased by the escrowed amount
     const sellerAtaAccount = await getAccount(provider.connection, sellerAta);
     expect(Number(sellerAtaAccount.amount)).to.equal(escrowAmount.toNumber());
-
-    // Assert: Escrow ATA balance is now 0
-    escrowAtaAccount = await getAccount(provider.connection, escrowAta);
-    expect(Number(escrowAtaAccount.amount)).to.equal(0);
   });
 
   // -------------------------------------------------------------------------
@@ -262,9 +263,13 @@ describe("tradebridge escrow tests", () => {
       .signers([buyer])
       .rpc();
 
-    // Assert: Escrow status is Refunded
-    const escrowAccount = await program.account.tradeEscrow.fetch(escrowPda);
-    expect(escrowAccount.status.refunded).to.not.be.undefined;
+    // Assert: Escrow PDA is closed and rent returned to buyer
+    const closedEscrowAccount = await program.account.tradeEscrow.fetchNullable(escrowPda);
+    expect(closedEscrowAccount).to.be.null;
+
+    // Assert: Escrow Token Account is closed
+    const closedEscrowAtaInfo = await provider.connection.getAccountInfo(escrowAta);
+    expect(closedEscrowAtaInfo).to.be.null;
 
     // Assert: Buyer's token balance is fully restored to 1000 tokens
     const buyerAtaAccount = await getAccount(provider.connection, buyerAta);
@@ -425,7 +430,7 @@ describe("tradebridge escrow tests", () => {
       .signers([buyer])
       .rpc();
 
-    // Try releasing a second time
+    // Try releasing a second time (fails because escrow account has already been closed)
     try {
       await program.methods
         .releaseFunds()
@@ -441,7 +446,12 @@ describe("tradebridge escrow tests", () => {
         .rpc();
       expect.fail("Should have failed on second release attempt");
     } catch (err: any) {
-      expect(err.toString()).to.include("ShipmentNotConfirmed");
+      const errMsg = err.toString();
+      expect(
+        errMsg.includes("AccountNotInitialized") ||
+        errMsg.includes("3012") ||
+        errMsg.includes("ShipmentNotConfirmed")
+      ).to.be.true;
     }
   });
 
@@ -543,5 +553,116 @@ describe("tradebridge escrow tests", () => {
     } catch (err: any) {
       expect(err.toString()).to.include("DeadlineInPast");
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 8: Dispute Path
+  // -------------------------------------------------------------------------
+  it("Dispute path: shipment confirmed, buyer raises dispute, funds frozen", async () => {
+    const { buyer, seller, buyerAta, sellerAta } = await setupBuyerAndSeller();
+    const { escrowPda, escrowAta } = getEscrowPdaAndAta(buyer.publicKey, seller.publicKey, mint);
+
+    const escrowAmount = new anchor.BN(30 * 1_000_000);
+    const now = await getOnChainTimestamp();
+    const deadline = new anchor.BN(now + 2); // 2 second deadline
+
+    // 1. Buyer creates escrow
+    await program.methods
+      .createTradeEscrow(escrowAmount, deadline)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        mint,
+        buyerTokenAccount: buyerAta,
+        escrow: escrowPda,
+        escrowTokenAccount: escrowAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // 2. Seller confirms shipment
+    await program.methods
+      .confirmShipment("DISPUTE-TRACK-999")
+      .accountsPartial({
+        seller: seller.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([seller])
+      .rpc();
+
+    // 3. Buyer raises dispute
+    await program.methods
+      .raiseDispute()
+      .accountsPartial({
+        signer: buyer.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // Verify status is Disputed
+    const escrowAccount = await program.account.tradeEscrow.fetch(escrowPda);
+    expect(escrowAccount.status.disputed).to.not.be.undefined;
+
+    // 4. Assert release_funds fails (funds frozen)
+    try {
+      await program.methods
+        .releaseFunds()
+        .accountsPartial({
+          buyer: buyer.publicKey,
+          escrow: escrowPda,
+          mint,
+          escrowTokenAccount: escrowAta,
+          sellerTokenAccount: sellerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([buyer])
+        .rpc();
+      expect.fail("release_funds should have failed on disputed escrow");
+    } catch (err: any) {
+      const errMsg = err.toString();
+      expect(
+        errMsg.includes("EscrowDisputed") || errMsg.includes("ShipmentNotConfirmed")
+      ).to.be.true;
+    }
+
+    // 5. Wait for deadline to expire, then assert refund_if_expired also fails (funds frozen)
+    while (true) {
+      await sleep(1000);
+      const currentTime = await getOnChainTimestamp();
+      if (currentTime > deadline.toNumber()) {
+        break;
+      }
+    }
+
+    try {
+      await program.methods
+        .refundIfExpired()
+        .accountsPartial({
+          buyer: buyer.publicKey,
+          escrow: escrowPda,
+          mint,
+          escrowTokenAccount: escrowAta,
+          buyerTokenAccount: buyerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([buyer])
+        .rpc();
+      expect.fail("refund_if_expired should have failed on disputed escrow");
+    } catch (err: any) {
+      const errMsg = err.toString();
+      expect(
+        errMsg.includes("EscrowDisputed") || errMsg.includes("InvalidStatusForRefund")
+      ).to.be.true;
+    }
+
+    // Verify escrow account and vault remain open and unchanged with funds locked
+    const finalEscrow = await program.account.tradeEscrow.fetch(escrowPda);
+    expect(finalEscrow.status.disputed).to.not.be.undefined;
+    const finalVault = await getAccount(provider.connection, escrowAta);
+    expect(Number(finalVault.amount)).to.equal(escrowAmount.toNumber());
   });
 });

@@ -36,18 +36,17 @@ async function startValidatorIfNeeded(): Promise<ChildProcess | null> {
   }
 
   console.log("🚀 Starting local Solana test validator with TradeBridge program preloaded...");
+  const ledgerPath = path.resolve(__dirname, "../.anchor/test-ledger");
   const soPath = path.resolve(__dirname, "../target/deploy/tradebridge.so");
   const programId = "3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v";
 
+  const validatorArgs = fs.existsSync(ledgerPath)
+    ? ["--ledger", ledgerPath, "--quiet"]
+    : ["--reset", "--quiet", "--bpf-program", programId, soPath, "--clone", "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA", "--clone", "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL", "--url", "https://api.devnet.solana.com"];
+
   const validatorProc = spawn(
     "solana-test-validator",
-    [
-      "--reset",
-      "--quiet",
-      "--bpf-program",
-      programId,
-      soPath,
-    ],
+    validatorArgs,
     { stdio: "ignore", detached: true }
   );
 
