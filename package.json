@@ -3,7 +3,8 @@
   "scripts": {
     "lint:fix": "prettier */*.js \"*/**/*{.js,.ts}\" -w",
     "lint": "prettier */*.js \"*/**/*{.js,.ts}\" --check",
-    "scenario": "ts-node scripts/scenario-runner.ts"
+    "scenario": "ts-node scripts/scenario-runner.ts",
+    "devnet-demo": "ts-node scripts/devnet-demo.ts"
   },
   "dependencies": {
     "@coral-xyz/anchor": "^0.31.1",

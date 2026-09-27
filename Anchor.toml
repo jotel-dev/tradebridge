@@ -12,7 +12,7 @@ tradebridge = "3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v"
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "localnet"
+cluster = "devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
