@@ -1,0 +1,928 @@
+{
+  "address": "3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v",
+  "metadata": {
+    "name": "tradebridge",
+    "version": "0.1.0",
+    "spec": "0.1.0",
+    "description": "Created with Anchor"
+  },
+  "instructions": [
+    {
+      "name": "confirm_shipment",
+      "docs": [
+        "2. confirm_shipment:",
+        "- Called by the designated seller to register shipping details (tracking reference).",
+        "- Status must be `Created`. Transitions to `ShipmentConfirmed`."
+      ],
+      "discriminator": [
+        178,
+        149,
+        15,
+        230,
+        47,
+        7,
+        76,
+        104
+      ],
+      "accounts": [
+        {
+          "name": "seller",
+          "docs": [
+            "Must be the designated seller stored in the escrow. `has_one` validates `seller == escrow.seller`."
+          ],
+          "signer": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The Escrow state PDA to update."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.buyer",
+                "account": "TradeEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.seller",
+                "account": "TradeEscrow"
+              }
+            ]
+          }
+        }
+      ],
+      "args": [
+        {
+          "name": "tracking_ref",
+          "type": "string"
+        }
+      ]
+    },
+    {
+      "name": "create_trade_escrow",
+      "docs": [
+        "1. create_trade_escrow:",
+        "- The buyer deposits tokens into an Associated Token Account (ATA) owned by the escrow PDA.",
+        "- Sets the status to Created.",
+        "- Validates that amount > 0 and the deadline is in the future."
+      ],
+      "discriminator": [
+        149,
+        181,
+        111,
+        61,
+        122,
+        174,
+        71,
+        51
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "docs": [
+            "The buyer funding the escrow. Must sign and pay the lamports for account rent."
+          ],
+          "writable": true,
+          "signer": true
+        },
+        {
+          "name": "seller",
+          "docs": [
+            "or exist as an initialized account at creation time; used solely as a seed for the PDA."
+          ]
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "The SPL token mint of the currency being traded (e.g., USDC)."
+          ]
+        },
+        {
+          "name": "buyer_token_account",
+          "docs": [
+            "The buyer's token account containing the tokens to deposit."
+          ],
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The Escrow state PDA, derived from [b\"escrow\", buyer_pubkey, seller_pubkey]."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "buyer"
+              },
+              {
+                "kind": "account",
+                "path": "seller"
+              }
+            ]
+          }
+        },
+        {
+          "name": "escrow_token_account",
+          "docs": [
+            "The Associated Token Account (ATA) owned by the escrow PDA to safely custody the funds."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        },
+        {
+          "name": "associated_token_program",
+          "address": "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL"
+        },
+        {
+          "name": "system_program",
+          "address": "11111111111111111111111111111111"
+        }
+      ],
+      "args": [
+        {
+          "name": "amount",
+          "type": "u64"
+        },
+        {
+          "name": "deadline",
+          "type": "i64"
+        }
+      ]
+    },
+    {
+      "name": "raise_dispute",
+      "docs": [
+        "5. raise_dispute:",
+        "- Called by either the buyer OR the seller stored in the escrow.",
+        "- Current status must be `ShipmentConfirmed`.",
+        "- Updates status to `Disputed` and emits `DisputeRaised` event.",
+        "- Freezes the escrow from unilateral release or refund."
+      ],
+      "discriminator": [
+        41,
+        243,
+        1,
+        51,
+        150,
+        95,
+        246,
+        73
+      ],
+      "accounts": [
+        {
+          "name": "signer",
+          "docs": [
+            "Signer can be either the designated buyer OR the designated seller stored in the escrow."
+          ],
+          "signer": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The Escrow state PDA to transition into Disputed status."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.buyer",
+                "account": "TradeEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.seller",
+                "account": "TradeEscrow"
+              }
+            ]
+          }
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "refund_if_expired",
+      "docs": [
+        "4. refund_if_expired:",
+        "- Called by the buyer if the deadline passed without shipment confirmation.",
+        "- Status MUST be `Created` (if shipment was confirmed, buyer cannot refund). Cannot be refunded if disputed.",
+        "- Current on-chain timestamp must be strictly greater than the deadline."
+      ],
+      "discriminator": [
+        238,
+        147,
+        221,
+        74,
+        90,
+        244,
+        80,
+        176
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "docs": [
+            "Must be the designated buyer stored in the escrow. `has_one` validates `buyer == escrow.buyer`."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The Escrow state PDA, closed and rent returned to the buyer upon refund."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.buyer",
+                "account": "TradeEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.seller",
+                "account": "TradeEscrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Token mint of the held assets."
+          ]
+        },
+        {
+          "name": "escrow_token_account",
+          "docs": [
+            "The escrow PDA's token vault holding the tokens."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "buyer_token_account",
+          "docs": [
+            "The buyer's token account receiving the refunded funds."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    },
+    {
+      "name": "release_funds",
+      "docs": [
+        "3. release_funds:",
+        "- Called by the buyer once satisfied with shipment/goods.",
+        "- Status must be `ShipmentConfirmed`. Cannot be released if disputed.",
+        "- Transfers the escrowed tokens to the seller's token account using the PDA's seeds to sign."
+      ],
+      "discriminator": [
+        225,
+        88,
+        91,
+        108,
+        126,
+        52,
+        2,
+        26
+      ],
+      "accounts": [
+        {
+          "name": "buyer",
+          "docs": [
+            "Must be the designated buyer stored in the escrow. `has_one` validates `buyer == escrow.buyer`."
+          ],
+          "writable": true,
+          "signer": true,
+          "relations": [
+            "escrow"
+          ]
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The Escrow state PDA, closed and rent returned to the buyer upon completion."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.buyer",
+                "account": "TradeEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.seller",
+                "account": "TradeEscrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Token mint of the held assets."
+          ]
+        },
+        {
+          "name": "escrow_token_account",
+          "docs": [
+            "The escrow PDA's token vault holding the tokens."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "seller_token_account",
+          "docs": [
+            "The seller's token account that will receive the funds."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": []
+    }
+  ],
+  "accounts": [
+    {
+      "name": "TradeEscrow",
+      "discriminator": [
+        251,
+        124,
+        237,
+        23,
+        18,
+        126,
+        198,
+        49
+      ]
+    }
+  ],
+  "events": [
+    {
+      "name": "DisputeRaised",
+      "discriminator": [
+        246,
+        167,
+        109,
+        37,
+        142,
+        45,
+        38,
+        176
+      ]
+    }
+  ],
+  "errors": [
+    {
+      "code": 6000,
+      "name": "InvalidAmount",
+      "msg": "Escrow deposit amount must be greater than zero."
+    },
+    {
+      "code": 6001,
+      "name": "DeadlineInPast",
+      "msg": "The escrow deadline must be in the future."
+    },
+    {
+      "code": 6002,
+      "name": "UnauthorizedSeller",
+      "msg": "Signer is not authorized: only the designated seller can confirm shipment."
+    },
+    {
+      "code": 6003,
+      "name": "UnauthorizedBuyer",
+      "msg": "Signer is not authorized: only the designated buyer can execute this action."
+    },
+    {
+      "code": 6004,
+      "name": "InvalidStatusForShipment",
+      "msg": "Shipment can only be confirmed when escrow status is Created."
+    },
+    {
+      "code": 6005,
+      "name": "TrackingRefTooLong",
+      "msg": "Tracking reference must not exceed 100 characters."
+    },
+    {
+      "code": 6006,
+      "name": "EmptyTrackingRef",
+      "msg": "Tracking reference cannot be empty."
+    },
+    {
+      "code": 6007,
+      "name": "ShipmentNotConfirmed",
+      "msg": "Funds cannot be released until the seller has confirmed shipment."
+    },
+    {
+      "code": 6008,
+      "name": "InvalidStatusForRefund",
+      "msg": "Refund is not allowed: shipment has already been confirmed or trade is already finalized."
+    },
+    {
+      "code": 6009,
+      "name": "DeadlineNotPassed",
+      "msg": "The escrow deadline has not yet passed; refund is not yet available."
+    },
+    {
+      "code": 6010,
+      "name": "InvalidBuyerTokenAccount",
+      "msg": "The provided token account does not belong to the buyer."
+    },
+    {
+      "code": 6011,
+      "name": "InvalidSellerTokenAccount",
+      "msg": "The provided token account does not belong to the seller."
+    },
+    {
+      "code": 6012,
+      "name": "InvalidTokenMint",
+      "msg": "The token account mint does not match the escrow token mint."
+    },
+    {
+      "code": 6013,
+      "name": "UnauthorizedParty",
+      "msg": "Signer is not authorized: must be either the buyer or the seller."
+    },
+    {
+      "code": 6014,
+      "name": "DisputeAlreadyRaised",
+      "msg": "A dispute has already been raised for this escrow."
+    },
+    {
+      "code": 6015,
+      "name": "InvalidStatusForDispute",
+      "msg": "Disputes can only be raised after shipment has been confirmed and before funds are released."
+    },
+    {
+      "code": 6016,
+      "name": "EscrowDisputed",
+      "msg": "Escrow is disputed and all funds actions are frozen pending resolution."
+    }
+  ],
+  "types": [
+    {
+      "name": "DisputeRaised",
+      "docs": [
+        "Event emitted when a dispute is raised for an escrow."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "EscrowStatus",
+      "docs": [
+        "Lifecycle states of a TradeEscrow."
+      ],
+      "type": {
+        "kind": "enum",
+        "variants": [
+          {
+            "name": "Created"
+          },
+          {
+            "name": "ShipmentConfirmed"
+          },
+          {
+            "name": "Released"
+          },
+          {
+            "name": "Refunded"
+          },
+          {
+            "name": "Disputed"
+          }
+        ]
+      }
+    },
+    {
+      "name": "TradeEscrow",
+      "docs": [
+        "TradeEscrow PDA Account data structure.",
+        "Holds the parties, agreed amount, deadline, status, and shipping info."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "buyer",
+            "docs": [
+              "Public key of the buyer"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "docs": [
+              "Public key of the seller"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "mint",
+            "docs": [
+              "Token mint of the escrowed funds"
+            ],
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "docs": [
+              "Escrowed amount in token base units"
+            ],
+            "type": "u64"
+          },
+          {
+            "name": "deadline",
+            "docs": [
+              "Unix timestamp expiration deadline"
+            ],
+            "type": "i64"
+          },
+          {
+            "name": "status",
+            "docs": [
+              "Current status in the escrow workflow"
+            ],
+            "type": {
+              "defined": {
+                "name": "EscrowStatus"
+              }
+            }
+          },
+          {
+            "name": "tracking_ref",
+            "docs": [
+              "Shipping tracking reference string (max 100 chars)"
+            ],
+            "type": "string"
+          },
+          {
+            "name": "bump",
+            "docs": [
+              "PDA bump seed stored at creation to avoid re-deriving"
+            ],
+            "type": "u8"
+          }
+        ]
+      }
+    }
+  ]
+}
