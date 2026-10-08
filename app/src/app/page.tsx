@@ -20,8 +20,28 @@ import {
   EscrowLookupLoadingCard,
 } from "./components";
 
-const PROGRAM_ID = new PublicKey("3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v");
-const DEFAULT_USDC_MINT = new PublicKey("2Rehr4QfS9xpo6x8t9FptPneocaaYK5VyUiTaihnouzT");
+function parsePublicKey(value: string | undefined, fallback: string, varName: string): PublicKey {
+  const raw = value ? value.trim().replace(/^[\uFEFF\u200B]+/, "") : "";
+  const keyStr = raw || fallback;
+  try {
+    return new PublicKey(keyStr);
+  } catch (err) {
+    throw new Error(
+      `Invalid PublicKey configured for ${varName}: "${keyStr}". Please ensure it is a valid 32-byte base58 string.`
+    );
+  }
+}
+
+const PROGRAM_ID = parsePublicKey(
+  process.env.NEXT_PUBLIC_PROGRAM_ID,
+  "3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v",
+  "NEXT_PUBLIC_PROGRAM_ID"
+);
+const DEFAULT_USDC_MINT = parsePublicKey(
+  process.env.NEXT_PUBLIC_DEFAULT_USDC_MINT,
+  "2Rehr4QfS9xpo6x8t9FptPneocaaYK5VyUiTaihnouzT",
+  "NEXT_PUBLIC_DEFAULT_USDC_MINT"
+);
 
 export type EscrowStatusType =
   | "Created"

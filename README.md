@@ -4,7 +4,36 @@
 
 # TradeBridge: Trustless B2B Escrow Protocol on Solana
 
+> Built for the **Colosseum Crypto World's Fair Hackathon** (Solana track) and the **Superteam Nigeria side track**.
+
+- **Demo video:** TODO
+- **Live app:** TODO
+
 TradeBridge is a non-custodial, escrow-backed cross-border settlement protocol built on Solana. It eliminates intermediary risk, high wire fees, and slow settlement in global physical trade by locking funds in Program Derived Address (PDA) vaults and releasing them deterministically upon verified shipment confirmation.
+
+---
+
+## Problem
+
+Nigerian SME exporters selling to buyers abroad face a trust deadlock � the buyer won't pay before shipment, the seller won't ship before payment, and bank letters of credit are too slow, expensive, and inaccessible for small transactions. TradeBridge replaces the bank with program logic.
+
+---
+
+## Live on Devnet
+
+- **Program ID:** [`3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v`](https://explorer.solana.com/address/3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v?cluster=devnet)
+- **Test USDC Mint (6 decimals, devnet only):** `2Rehr4QfS9xpo6x8t9FptPneocaaYK5VyUiTaihnouzT`
+
+### Verifiable On-Chain Transactions (Post-Hardening Run)
+
+| Action | Transaction Signature |
+| :--- | :--- |
+| **Program redeploy** | [`SDkzPqDupwEAvhUXy4DzXQmgMfPjVNNku6GDvDSWs7mMKRCypEBpcBDfTyzp6H4CmkhRvig1yPEU4cbA99teJPq`](https://explorer.solana.com/tx/SDkzPqDupwEAvhUXy4DzXQmgMfPjVNNku6GDvDSWs7mMKRCypEBpcBDfTyzp6H4CmkhRvig1yPEU4cbA99teJPq?cluster=devnet) |
+| **Create escrow ($250)** | [`4WRC4qzzLrgH8Hzc9z4KJdgrCxR33Phbi8AhsauToXNsNJcCqFgoQrRQq6jNaNvfFJpxtcx8CvNuEEMDBue4gw11`](https://explorer.solana.com/tx/4WRC4qzzLrgH8Hzc9z4KJdgrCxR33Phbi8AhsauToXNsNJcCqFgoQrRQq6jNaNvfFJpxtcx8CvNuEEMDBue4gw11?cluster=devnet) |
+| **Confirm shipment** | [`4ZBXnrYPKtckWj8k1Uv65a2xW3YCi6kCj5cq7tpaDBE3VkYvRu93k9C9E67iMDRdH9WzR9skepkBxBVFgbUTMJmD`](https://explorer.solana.com/tx/4ZBXnrYPKtckWj8k1Uv65a2xW3YCi6kCj5cq7tpaDBE3VkYvRu93k9C9E67iMDRdH9WzR9skepkBxBVFgbUTMJmD?cluster=devnet) |
+| **Release funds** (escrow + vault accounts closed, rent reclaimed) | [`3P4aeoAmybsEbEFTXcvrEoybJjqc1ZTg4L7vjvzvEwq2tvR1oFBBk4weDU4gxsaywezJJeYLUprSDMWQJQBQPLuw`](https://explorer.solana.com/tx/3P4aeoAmybsEbEFTXcvrEoybJjqc1ZTg4L7vjvzvEwq2tvR1oFBBk4weDU4gxsaywezJJeYLUprSDMWQJQBQPLuw?cluster=devnet) |
+
+> The full create ? confirm ? release flow was also verified manually through the web UI with two real Phantom wallets on devnet.
 
 ---
 
@@ -14,28 +43,28 @@ TradeBridge models the bilateral physical trade lifecycle as a deterministic on-
 
 ```
                             [ Buyer deposits funds ]
-                                       │
-                                       ▼
-                             ┌──────────────────┐
-                             │     Created      │
-                             └─────────┬────────┘
-                                       │
-                     ┌─────────────────┴─────────────────┐
+                                       �
+                                       ?
+                             +------------------+
+                             �     Created      �
+                             +------------------+
+                                       �
+                     +-----------------------------------+
     [ Deadline passed without shipment ]    [ Seller submits tracking ref ]
-                     │                                   │
-                     ▼                                   ▼
-           ┌──────────────────┐                ┌──────────────────┐
-           │     Refunded     │                │ ShipmentConfirmed│
-           └──────────────────┘                └─────────┬────────┘
-                                                         │
-                                        ┌────────────────┴────────────────┐
+                     �                                   �
+                     ?                                   ?
+           +------------------+                +------------------+
+           �     Refunded     �                � ShipmentConfirmed�
+           +------------------+                +------------------+
+                                                         �
+                                        +---------------------------------+
                        [ Buyer confirms receipt ]               [ Buyer/Seller raises dispute ]
-                                        │                                         │
-                                        ▼                                         ▼
-                              ┌──────────────────┐                      ┌──────────────────┐
-                              │     Released     │                      │     Disputed     │
-                              └──────────────────┘                      │  (Funds frozen)  │
-                                                                        └──────────────────┘
+                                        �                                         �
+                                        ?                                         ?
+                              +------------------+                      +------------------+
+                              �     Released     �                      �     Disputed     �
+                              +------------------+                      �  (Funds frozen)  �
+                                                                        +------------------+
 ```
 
 ---
@@ -47,19 +76,29 @@ TradeBridge models the bilateral physical trade lifecycle as a deterministic on-
 TradeBridge's v1 shipment verification relies on the **seller submitting an on-chain tracking reference** and the **buyer manually confirming receipt** before releasing escrowed funds.
 
 > **Intentional v1 Scope, Not an Oversight:**
-> We deliberately chose this mechanism over two more complex alternatives — an oracle-fed shipment tracking feed or a neutral third-party (e.g., freight forwarder/customs partner) attestation — because manual confirmation is realistically buildable within a solo hackathon timeframe while still rigorously proving the core trust mechanism: **escrowed funds that cannot be unilaterally released or refunded once shipment is confirmed.**
+> We deliberately chose this mechanism over two more complex alternatives � an oracle-fed shipment tracking feed or a neutral third-party (e.g., freight forwarder/customs partner) attestation � because manual confirmation is realistically buildable within a solo hackathon timeframe while still rigorously proving the core trust mechanism: **escrowed funds that cannot be unilaterally released or refunded once shipment is confirmed.**
 
 #### Built-In Safeguards in v1:
-- **Seller Protection:** Once the seller confirms shipment with a valid tracking reference, the buyer is strictly prevented from triggering a timeout refund (`refund_if_expired`). The buyer cannot take delivery and walk away with the funds.
+- **Seller Protection:** Once shipment is confirmed, the buyer can no longer reclaim funds via timeout refund; funds can only be released to the seller or frozen via dispute.
 - **Buyer Protection:** Funds cannot be released until the seller has confirmed shipment on-chain. If the seller defaults and never ships before the Unix deadline, the buyer can reclaim 100% of their deposit.
 - **Freeze Mechanism (`raise_dispute`):** If goods are damaged, missing, or fraudulent, either party can invoke `raise_dispute` to permanently freeze fund movements on-chain and emit a `DisputeRaised` event for off-chain or arbitration resolution.
 
 #### Production Upgrade Roadmap:
-The existing [`TradeEscrow`](file:///Ubuntu-22.04/home/joel/tradebridge/programs/tradebridge/src/lib.rs#L318) account layout is designed to support production upgrades **without breaking account structures or migrating PDAs**:
+The existing `TradeEscrow` account layout is designed to support production upgrades **without breaking account structures or migrating PDAs**:
 1. **Option A (Carrier Oracle Integration):** Connect an oracle crank (e.g., Switchboard or Chainlink Functions) that polls carrier APIs using the stored `tracking_ref` and automatically triggers `release_funds` upon verified carrier `"DELIVERED"` status.
 2. **Option B (Neutral Logistics Attestation):** Require a cryptographic co-signature from an authorized logistics partner or inspection agent alongside the buyer's approval, removing single-party reliance entirely.
 
-For the full architectural analysis and trade-off matrix, see [design/DESIGN_DECISIONS.md](file:///Ubuntu-22.04/home/joel/tradebridge/design/DESIGN_DECISIONS.md).
+For the full architectural analysis and trade-off matrix, see [design/DESIGN_DECISIONS.md](design/DESIGN_DECISIONS.md).
+
+---
+
+## Known Limitations (v1)
+
+- **No timeout release:** If the buyer never releases after shipment is confirmed, funds stay locked (planned: auto-release after N days if no dispute).
+- **Disputed escrows:** Disputed escrows are frozen with no on-chain resolution instruction (planned: designated arbiter / `resolve_dispute`).
+- **Single active agreement per pair:** One active escrow per buyer�seller pair (PDA seeds are `[escrow, buyer, seller]`).
+- **Unverified tracking input:** Tracking reference is unverified free text (planned: carrier oracle or logistics attestation, see design decisions above).
+- **Devnet scope:** Uses a devnet test USDC mint; unaudited; not for mainnet use.
 
 ---
 
@@ -73,11 +112,11 @@ For the full architectural analysis and trade-off matrix, see [design/DESIGN_DEC
 
 | Instruction | Signer | State Required | Description |
 | :--- | :--- | :--- | :--- |
-| [`create_trade_escrow`](file:///Ubuntu-22.04/home/joel/tradebridge/programs/tradebridge/src/lib.rs#L15) | Buyer | *None (Initializes)* | Transfers tokens from buyer into escrow PDA vault; sets deadline and amount. |
-| [`confirm_shipment`](file:///Ubuntu-22.04/home/joel/tradebridge/programs/tradebridge/src/lib.rs#L69) | Seller | `Created` | Stores courier tracking reference (up to 100 chars); advances status to `ShipmentConfirmed`. |
-| [`release_funds`](file:///Ubuntu-22.04/home/joel/tradebridge/programs/tradebridge/src/lib.rs#L108) | Buyer | `ShipmentConfirmed` | Releases vault tokens to seller token account using PDA signer seeds; reclaims rent. |
-| [`refund_if_expired`](file:///Ubuntu-22.04/home/joel/tradebridge/programs/tradebridge/src/lib.rs#L177) | Buyer | `Created` (Post-deadline) | Returns locked tokens to buyer if seller failed to ship before deadline; reclaims rent. |
-| [`raise_dispute`](file:///Ubuntu-22.04/home/joel/tradebridge/programs/tradebridge/src/lib.rs#L252) | Buyer or Seller | `ShipmentConfirmed` | Transitions status to `Disputed`, freezing all token transfers and emitting an event. |
+| `create_trade_escrow` | Buyer | *None (Initializes)* | Transfers tokens from buyer into escrow PDA vault; sets deadline and amount. |
+| `confirm_shipment` | Seller | `Created` | Stores courier tracking reference (up to 100 chars); advances status to `ShipmentConfirmed`. |
+| `release_funds` | Buyer | `ShipmentConfirmed` | Releases vault tokens to seller token account using PDA signer seeds; reclaims rent. |
+| `refund_if_expired` | Buyer | `Created` (Post-deadline) | Returns locked tokens to buyer if seller failed to ship before deadline; reclaims rent. |
+| `raise_dispute` | Buyer or Seller | `ShipmentConfirmed` | Transitions status to `Disputed`, freezing all token transfers and emitting an event. |
 
 ---
 
@@ -85,21 +124,22 @@ For the full architectural analysis and trade-off matrix, see [design/DESIGN_DEC
 
 ```
 tradebridge/
-├── programs/
-│   └── tradebridge/
-│       └── src/
-│           └── lib.rs             # Anchor program source code
-├── tests/
-│   └── tradebridge.ts            # Integration test suite (8 tests)
-├── scripts/
-│   ├── scenario-runner.ts        # 4 narrated B2B trade simulation scenarios
-│   └── devnet-demo.ts            # Live Devnet deployment & execution demo
-├── app/                          # Next.js 14 frontend web application
-│   ├── src/app/                  # App Router pages and components
-│   └── public/                   # Static branding & assets
-└── design/
-    ├── DESIGN_DECISIONS.md       # ADR-001: Manual vs. Oracle / Attestation analysis
-    └── LOGO_PROMPT.md            # Brand identity design prompt
++-- programs/
+�   +-- tradebridge/
+�       +-- src/
+�           +-- lib.rs             # Anchor program source code
++-- tests/
+�   +-- tradebridge.ts            # Integration test suite (8 tests)
++-- scripts/
+�   +-- scenario-runner.ts        # 4 narrated B2B trade simulation scenarios
+�   +-- devnet-demo.ts            # Live Devnet deployment & execution demo
++-- app/                          # Next.js 14 frontend web application
+�   +-- src/app/                  # App Router pages and components
+�   +-- public/                   # Static branding & assets
++-- design/
+�   +-- DESIGN_DECISIONS.md       # ADR-001: Manual vs. Oracle / Attestation analysis
+�   +-- LOGO_PROMPT.md            # Brand identity design prompt
++-- LICENSE                       # MIT License
 ```
 
 ---
@@ -107,10 +147,19 @@ tradebridge/
 ## Getting Started
 
 ### Prerequisites
-- Node.js 18+ and Yarn
-- Rust & Cargo
-- Solana CLI (`solana-cli 1.18+`)
-- Anchor CLI (`avm install 0.30.1`)
+- **Rust:** 1.96.1
+- **Solana CLI (Agave):** 2.1.0
+- **Anchor CLI:** 0.31.1
+- **Node.js:** 20+ and **Yarn:** 1.22+
+
+> **Note on Ubuntu 22.04:**
+> On Ubuntu 22.04 the prebuilt Anchor binaries fail with a GLIBC error, so build from source with:
+> ```bash
+> cargo install --git https://github.com/coral-xyz/anchor --tag v0.31.1 anchor-cli --locked --force
+> ```
+
+> **Known Build Issue:**
+> The SBF toolchain uses Rust 1.79, so `Cargo.lock` pins these crates to pre-edition2024 versions: `blake3 1.5.5`, `zeroize 1.8.1`, `zeroize_derive 1.4.2`, `proc-macro-crate 3.2.0`, `indexmap 2.7.0`, `unicode-segmentation 1.12.0`. Do **NOT** run `cargo update`, and keep `Cargo.lock` committed.
 
 ### 1. Build and Run Tests
 ```bash
@@ -121,10 +170,13 @@ yarn install
 anchor test
 ```
 
-### 2. Run Narrated Trade Scenarios
+### 2. Run Narrated Trade Scenarios & Live Devnet Demo
 ```bash
 # Runs 4 automated scenarios (Happy path, No-ship refund, Impersonation attack, Dispute freeze)
-yarn ts-node scripts/scenario-runner.ts
+yarn scenario
+
+# Runs live Devnet transaction verification demo
+yarn devnet-demo
 ```
 
 ### 3. Launch Frontend Web Application
@@ -134,3 +186,9 @@ yarn install
 yarn dev
 ```
 Open [http://localhost:3000](http://localhost:3000) in your browser.
+
+---
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
