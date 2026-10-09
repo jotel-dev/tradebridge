@@ -9,6 +9,7 @@ import {
   TOKEN_PROGRAM_ID,
   ASSOCIATED_TOKEN_PROGRAM_ID,
   getAssociatedTokenAddressSync,
+  createAssociatedTokenAccountIdempotentInstruction,
 } from "@solana/spl-token";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import idl from "@/idl/tradebridge.json";
@@ -109,6 +110,11 @@ export default function Home() {
   // Transaction States
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [txError, setTxError] = useState<string | null>(null);
+
+  // Faucet States
+  const [isRequestingFaucet, setIsRequestingFaucet] = useState(false);
+  const [faucetTxSig, setFaucetTxSig] = useState<string | null>(null);
+  const [faucetError, setFaucetError] = useState<string | null>(null);
 
   // Auto escrow check on connect
   const [isCheckingEscrow, setIsCheckingEscrow] = useState(false);
@@ -526,6 +532,14 @@ export default function Home() {
 
       appendLog(`Releasing funds to seller & closing escrow PDA accounts...`, "info");
 
+      // Idempotently create the seller's associated token account if it doesn't already exist (payer = buyer, owner = seller)
+      const createSellerAtaIx = createAssociatedTokenAccountIdempotentInstruction(
+        publicKey,
+        sellerAta,
+        activeEscrow.seller,
+        DEFAULT_USDC_MINT
+      );
+
       const txSig = await (program.methods as any)
         .releaseFunds()
         .accounts({
@@ -539,6 +553,7 @@ export default function Home() {
           tokenProgram: TOKEN_PROGRAM_ID,
           systemProgram: SystemProgram.programId,
         })
+        .preInstructions([createSellerAtaIx])
         .rpc();
 
       appendLog(`Funds released & rent reclaimed — tx: ${txSig.slice(0, 8)}...`, "success", txSig);
@@ -550,6 +565,38 @@ export default function Home() {
       appendLog(`Release failed: ${msg}`, "error");
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  // FAUCET: Request 100 test USDC
+  const handleRequestFaucet = async () => {
+    if (!publicKey) return;
+    setIsRequestingFaucet(true);
+    setFaucetTxSig(null);
+    setFaucetError(null);
+    appendLog("Requesting 100 test USDC from faucet...", "info");
+
+    try {
+      const res = await fetch("/api/faucet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address: publicKey.toBase58() }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `Faucet request failed (${res.status})`);
+      }
+
+      setFaucetTxSig(data.signature);
+      appendLog("Received 100 test USDC from faucet", "success", data.signature);
+    } catch (err: any) {
+      console.error("Faucet request error:", err);
+      const msg = err?.message || "Failed to request test USDC.";
+      setFaucetError(msg);
+      appendLog(`Faucet request failed: ${msg}`, "error");
+    } finally {
+      setIsRequestingFaucet(false);
     }
   };
 
@@ -742,6 +789,92 @@ export default function Home() {
             </div>
           </div>
         </section>
+
+        {/* Test USDC & SOL Faucet Panel (Visible when wallet is connected) */}
+        {connected && (
+          <section className="tb-panel p-5 bg-gradient-to-r from-blue-500/[0.07] via-indigo-500/[0.04] to-transparent border-blue-500/20">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <span className="tb-label text-blue-600 dark:text-blue-400">Devnet Test USDC Faucet</span>
+                  <span className="rounded-full bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 font-mono text-[10px] text-blue-600 dark:text-blue-300">
+                    +100 USDC
+                  </span>
+                </div>
+                <div className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                  Fund your wallet with test tokens to create or test escrow settlements.
+                </div>
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-slate-500 dark:text-[#9ba1b0]">
+                  <span>Need devnet gas?</span>
+                  <a
+                    href="https://faucet.solana.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline inline-flex items-center gap-1"
+                  >
+                    <span>Solana Devnet SOL Faucet</span>
+                    <span aria-hidden="true">↗</span>
+                  </a>
+                  <span className="text-slate-400 dark:text-slate-500">•</span>
+                  <span className="text-slate-500 dark:text-slate-400 italic">
+                    Devnet SOL is needed for transaction fees.
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 shrink-0">
+                <button
+                  type="button"
+                  id="faucet-request-btn"
+                  onClick={handleRequestFaucet}
+                  disabled={isRequestingFaucet}
+                  className="tb-button bg-[#3b82f6] text-white hover:bg-blue-600 disabled:opacity-50 disabled:cursor-not-allowed transition flex items-center justify-center gap-2 shadow-sm"
+                >
+                  {isRequestingFaucet ? (
+                    <>
+                      <RotatingLogoSpinner size={16} />
+                      <span>Minting 100 USDC…</span>
+                    </>
+                  ) : (
+                    <span>Get 100 test USDC</span>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {/* Explorer link on success */}
+            {faucetTxSig && (
+              <div className="mt-3.5 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-2.5 text-xs text-emerald-800 dark:text-emerald-300">
+                <div className="flex items-center gap-2">
+                  <span className="font-semibold">✓ 100 test USDC successfully sent to your wallet!</span>
+                </div>
+                <a
+                  href={`https://explorer.solana.com/tx/${faucetTxSig}?cluster=devnet`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-mono font-semibold text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 underline inline-flex items-center gap-1"
+                >
+                  <span>View on Solana Explorer</span>
+                  <span aria-hidden="true">↗</span>
+                </a>
+              </div>
+            )}
+
+            {/* Error message on failure */}
+            {faucetError && (
+              <div className="mt-3.5 flex items-center justify-between gap-2 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-2.5 text-xs text-red-700 dark:text-red-400">
+                <span>{faucetError}</span>
+                <button
+                  type="button"
+                  onClick={() => setFaucetError(null)}
+                  className="font-semibold underline hover:opacity-80 ml-2"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+          </section>
+        )}
 
         {/* Agreement Lookup Panel */}
         <section id="lookup-panel" className="tb-panel p-5 sm:p-6">

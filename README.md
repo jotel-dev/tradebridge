@@ -7,7 +7,7 @@
 > Built for the **Colosseum Crypto World's Fair Hackathon** (Solana track) and the **Superteam Nigeria side track**.
 
 - **Demo video:** TODO
-- **Live app:** TODO
+- **Live app:** [https://tradebridge-app.vercel.app](https://tradebridge-app.vercel.app)
 
 TradeBridge is a non-custodial, escrow-backed cross-border settlement protocol built on Solana. It eliminates intermediary risk, high wire fees, and slow settlement in global physical trade by locking funds in Program Derived Address (PDA) vaults and releasing them deterministically upon verified shipment confirmation.
 
@@ -15,7 +15,7 @@ TradeBridge is a non-custodial, escrow-backed cross-border settlement protocol b
 
 ## Problem
 
-Nigerian SME exporters selling to buyers abroad face a trust deadlock — the buyer won't pay before shipment, the seller won't ship before payment, and bank letters of credit are too slow, expensive, and inaccessible for small transactions. TradeBridge replaces the bank with program logic.
+Nigerian SME exporters selling to buyers abroad face a trust deadlock â€” the buyer won't pay before shipment, the seller won't ship before payment, and bank letters of credit are too slow, expensive, and inaccessible for small transactions. TradeBridge replaces the bank with program logic.
 
 ---
 
@@ -37,33 +37,48 @@ Nigerian SME exporters selling to buyers abroad face a trust deadlock — the buye
 
 ---
 
+## Try It Yourself (Live Devnet App)
+
+You can test the full bilateral escrow flow right now on Solana Devnet:
+
+1. **Launch App:** Visit [https://tradebridge-app.vercel.app](https://tradebridge-app.vercel.app).
+2. **Connect Wallet:** Connect Phantom (or Solflare) set to **Solana Devnet**.
+3. **Get Devnet Gas:** If your wallet is fresh, grab devnet SOL for transaction fees at [faucet.solana.com](https://faucet.solana.com).
+4. **Get Test USDC:** Click **"Get 100 test USDC"** in the top banner. The app mints/transfers 100 devnet USDC directly to your wallet.
+5. **Run the Bilateral Flow (Two Wallets):**
+   - **Buyer:** Enter the Seller's address under Agreement Lookup. Under "Initialize a new trade escrow", deposit 50 USDC with a 7-day deadline and click **Create escrow**.
+   - **Seller:** Connect the seller wallet (or search the Escrow PDA). Click **Confirm shipment** with an invoice reference / carrier tracking ID.
+   - **Buyer:** Reconnect the buyer wallet. Inspect the verified shipment reference and click **Release funds**. The protocol executes token transfer to the seller and reclaims the escrow PDA rent back to the buyer.
+
+---
+
 ## Architecture & Lifecycle
 
 TradeBridge models the bilateral physical trade lifecycle as a deterministic on-chain finite state machine:
 
 ```
                             [ Buyer deposits funds ]
-                                       ¦
+                                       |
                                        ?
                              +------------------+
-                             ¦     Created      ¦
+                             |     Created      |
                              +------------------+
-                                       ¦
+                                       |
                      +-----------------------------------+
     [ Deadline passed without shipment ]    [ Seller submits tracking ref ]
-                     ¦                                   ¦
+                     |                                   |
                      ?                                   ?
            +------------------+                +------------------+
-           ¦     Refunded     ¦                ¦ ShipmentConfirmed¦
+           |     Refunded     |                | ShipmentConfirmed|
            +------------------+                +------------------+
-                                                         ¦
+                                                         |
                                         +---------------------------------+
                        [ Buyer confirms receipt ]               [ Buyer/Seller raises dispute ]
-                                        ¦                                         ¦
+                                        |                                         |
                                         ?                                         ?
                               +------------------+                      +------------------+
-                              ¦     Released     ¦                      ¦     Disputed     ¦
-                              +------------------+                      ¦  (Funds frozen)  ¦
+                              |     Released     |                      |     Disputed     |
+                              +------------------+                      |  (Funds frozen)  |
                                                                         +------------------+
 ```
 
@@ -76,7 +91,7 @@ TradeBridge models the bilateral physical trade lifecycle as a deterministic on-
 TradeBridge's v1 shipment verification relies on the **seller submitting an on-chain tracking reference** and the **buyer manually confirming receipt** before releasing escrowed funds.
 
 > **Intentional v1 Scope, Not an Oversight:**
-> We deliberately chose this mechanism over two more complex alternatives — an oracle-fed shipment tracking feed or a neutral third-party (e.g., freight forwarder/customs partner) attestation — because manual confirmation is realistically buildable within a solo hackathon timeframe while still rigorously proving the core trust mechanism: **escrowed funds that cannot be unilaterally released or refunded once shipment is confirmed.**
+> We deliberately chose this mechanism over two more complex alternatives â€” an oracle-fed shipment tracking feed or a neutral third-party (e.g., freight forwarder/customs partner) attestation â€” because manual confirmation is realistically buildable within a solo hackathon timeframe while still rigorously proving the core trust mechanism: **escrowed funds that cannot be unilaterally released or refunded once shipment is confirmed.**
 
 #### Built-In Safeguards in v1:
 - **Seller Protection:** Once shipment is confirmed, the buyer can no longer reclaim funds via timeout refund; funds can only be released to the seller or frozen via dispute.
@@ -96,7 +111,7 @@ For the full architectural analysis and trade-off matrix, see [design/DESIGN_DEC
 
 - **No timeout release:** If the buyer never releases after shipment is confirmed, funds stay locked (planned: auto-release after N days if no dispute).
 - **Disputed escrows:** Disputed escrows are frozen with no on-chain resolution instruction (planned: designated arbiter / `resolve_dispute`).
-- **Single active agreement per pair:** One active escrow per buyer–seller pair (PDA seeds are `[escrow, buyer, seller]`).
+- **Single active agreement per pair:** One active escrow per buyerâ€“seller pair (PDA seeds are `[escrow, buyer, seller]`).
 - **Unverified tracking input:** Tracking reference is unverified free text (planned: carrier oracle or logistics attestation, see design decisions above).
 - **Devnet scope:** Uses a devnet test USDC mint; unaudited; not for mainnet use.
 
@@ -125,20 +140,20 @@ For the full architectural analysis and trade-off matrix, see [design/DESIGN_DEC
 ```
 tradebridge/
 +-- programs/
-¦   +-- tradebridge/
-¦       +-- src/
-¦           +-- lib.rs             # Anchor program source code
+|   +-- tradebridge/
+|       +-- src/
+|           +-- lib.rs             # Anchor program source code
 +-- tests/
-¦   +-- tradebridge.ts            # Integration test suite (8 tests)
+|   +-- tradebridge.ts            # Integration test suite (8 tests)
 +-- scripts/
-¦   +-- scenario-runner.ts        # 4 narrated B2B trade simulation scenarios
-¦   +-- devnet-demo.ts            # Live Devnet deployment & execution demo
+|   +-- scenario-runner.ts        # 4 narrated B2B trade simulation scenarios
+|   +-- devnet-demo.ts            # Live Devnet deployment & execution demo
 +-- app/                          # Next.js 14 frontend web application
-¦   +-- src/app/                  # App Router pages and components
-¦   +-- public/                   # Static branding & assets
+|   +-- src/app/                  # App Router pages and components
+|   +-- public/                   # Static branding & assets
 +-- design/
-¦   +-- DESIGN_DECISIONS.md       # ADR-001: Manual vs. Oracle / Attestation analysis
-¦   +-- LOGO_PROMPT.md            # Brand identity design prompt
+|   +-- DESIGN_DECISIONS.md       # ADR-001: Manual vs. Oracle / Attestation analysis
+|   +-- LOGO_PROMPT.md            # Brand identity design prompt
 +-- LICENSE                       # MIT License
 ```
 
