@@ -200,6 +200,9 @@ yarn install
 anchor test
 ```
 
+> [!NOTE]
+> Tests 9–13 exercise `resolve_dispute` and require the arbiter keypair (`~/tradebridge-arbiter.json`), so they are skipped gracefully on a fresh clone. The arbiter is a compile-time constant in `programs/tradebridge/src/lib.rs`, so a fork should replace it with its own key.
+
 ### 2. Run Narrated Trade Scenarios & Live Devnet Demo
 ```bash
 # Runs 4 automated scenarios (Happy path, No-ship refund, Impersonation attack, Dispute freeze)
