@@ -41,8 +41,13 @@ Nigerian SME exporters selling to buyers abroad face a trust deadlock — the bu
 
 You can test the full bilateral escrow flow right now on Solana Devnet:
 
+> [!NOTE]
+> **Wallet Requirement:** Use Phantom or Solflare set to Solana Devnet. Other wallets may default to Mainnet and will not work with this demo.
+> 
+> **How to enable Devnet in Phantom:** Settings → Developer Settings → Testnet Mode → check Solana Devnet.
+
 1. **Launch App:** Visit [https://tradebridge-app.vercel.app](https://tradebridge-app.vercel.app).
-2. **Connect Wallet:** Connect Phantom (or Solflare) set to **Solana Devnet**.
+2. **Connect Wallet:** Connect Phantom (or Solflare) set to **Solana Devnet**. *(Note: Use Phantom or Solflare set to Solana Devnet. Other wallets may default to Mainnet and will not work with this demo. In Phantom: Settings → Developer Settings → Testnet Mode → check Solana Devnet).*
 3. **Get Devnet Gas:** If your wallet is fresh, grab devnet SOL for transaction fees at [faucet.solana.com](https://faucet.solana.com).
 4. **Get Test USDC:** Click **"Get 100 test USDC"** in the top banner. The app mints/transfers 100 devnet USDC directly to your wallet.
 5. **Run the Bilateral Flow (Two Wallets):**

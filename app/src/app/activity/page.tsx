@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import Link from "next/link";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { WalletDevnetNotice } from "../components";
 import { useActivity, type ActivityType } from "../activity-context";
 import { BrandIcon, ThemeToggle } from "../components";
 
@@ -43,14 +44,17 @@ export default function ActivityPage() {
               <span>← Back to Dashboard</span>
             </Link>
             <ThemeToggle />
-            {walletUiMounted ? (
-              <WalletMultiButton className="!h-11 !max-w-[152px] !overflow-hidden !rounded-xl !bg-[#3b82f6] !font-semibold sm:!max-w-none" />
-            ) : (
-              <div
-                aria-hidden="true"
-                className="h-11 w-[152px] rounded-xl bg-slate-200/70 dark:bg-[#1b1e27]"
-              />
-            )}
+            <div className="relative">
+              {walletUiMounted ? (
+                <WalletMultiButton className="!h-11 !max-w-[152px] !overflow-hidden !rounded-xl !bg-[#3b82f6] !font-semibold sm:!max-w-none" />
+              ) : (
+                <div
+                  aria-hidden="true"
+                  className="h-11 w-[152px] rounded-xl bg-slate-200/70 dark:bg-[#1b1e27]"
+                />
+              )}
+              <WalletDevnetNotice />
+            </div>
           </div>
         </div>
       </header>

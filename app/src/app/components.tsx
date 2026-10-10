@@ -121,3 +121,51 @@ export function WalletLoadingIndicator({
     </div>
   );
 }
+
+export function WalletDevnetNotice({ className = "" }: { className?: string }) {
+  const [dismissed, setDismissed] = useState(true);
+
+  useEffect(() => {
+    const isDismissed = localStorage.getItem("tradebridge_wallet_notice_dismissed") === "true";
+    setDismissed(isDismissed);
+  }, []);
+
+  const handleDismiss = () => {
+    setDismissed(true);
+    try {
+      localStorage.setItem("tradebridge_wallet_notice_dismissed", "true");
+    } catch {
+      // ignore storage error if cookies/storage disabled
+    }
+  };
+
+  if (dismissed) return null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className={`absolute right-0 top-[calc(100%+8px)] z-30 w-72 sm:w-80 max-w-[calc(100vw-2rem)] rounded-xl border border-amber-500/30 bg-amber-50/95 p-3 text-xs text-amber-950 shadow-xl backdrop-blur-md dark:border-amber-400/25 dark:bg-[#1a1712]/95 dark:text-amber-200 transition-all ${className}`}
+    >
+      <div className="flex items-start gap-2.5">
+        <span className="mt-0.5 text-amber-600 dark:text-amber-400 text-sm shrink-0" aria-hidden="true">
+          ⚠️
+        </span>
+        <div className="flex-1 text-[11px] leading-relaxed">
+          Use Phantom or Solflare set to Solana Devnet. Other wallets may default to Mainnet and will not work with this demo.
+        </div>
+        <button
+          type="button"
+          onClick={handleDismiss}
+          aria-label="Dismiss notice"
+          className="shrink-0 -mr-1 -mt-1 rounded-md p-1 text-amber-700/70 hover:bg-amber-200/50 hover:text-amber-900 dark:text-amber-400/70 dark:hover:bg-amber-800/30 dark:hover:text-amber-200 transition-colors"
+          title="Dismiss notice"
+        >
+          <svg className="w-3.5 h-3.5" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+            <path d="M1 1l12 12M13 1L1 13" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  );
+}
