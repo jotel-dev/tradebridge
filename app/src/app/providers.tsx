@@ -59,6 +59,8 @@ function FilteredWalletProvider({ children }: { children: ReactNode }) {
   );
 }
 
+const connectionConfig = { commitment: "confirmed" as const };
+
 export function AppProviders({ children }: { children: ReactNode }) {
   const wallets = useMemo(
     () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
@@ -68,7 +70,7 @@ export function AppProviders({ children }: { children: ReactNode }) {
   return (
     <ThemeProvider>
       <ActivityProvider>
-        <ConnectionProvider endpoint={RPC_ENDPOINT}>
+        <ConnectionProvider endpoint={RPC_ENDPOINT} config={connectionConfig}>
           <WalletProvider wallets={wallets} autoConnect>
             <FilteredWalletProvider>
               <WalletModalProvider>{children}</WalletModalProvider>

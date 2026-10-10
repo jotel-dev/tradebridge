@@ -125,25 +125,35 @@ export default function Home() {
     setWalletUiMounted(true);
   }, []);
 
-  // Anchor Program client
+    // Anchor Program client
+  const provider = useMemo(() => {
+    if (!wallet || !wallet.publicKey) {
+      return new AnchorProvider(
+        connection,
+        {
+          publicKey: PublicKey.default,
+          signTransaction: async (tx: any) => tx,
+          signAllTransactions: async (txs: any) => txs,
+        } as any,
+        {
+          commitment: "confirmed",
+          preflightCommitment: "confirmed",
+        }
+      );
+    }
+    return new AnchorProvider(connection, wallet as any, {
+      commitment: "confirmed",
+      preflightCommitment: "confirmed",
+    });
+  }, [connection, wallet]);
+
   const program = useMemo(() => {
     try {
-      const provider = wallet && wallet.publicKey
-        ? new AnchorProvider(connection, wallet as any, { preflightCommitment: "confirmed" })
-        : new AnchorProvider(
-            connection,
-            {
-              publicKey: PublicKey.default,
-              signTransaction: async (tx: any) => tx,
-              signAllTransactions: async (txs: any) => txs,
-            } as any,
-            { preflightCommitment: "confirmed" }
-          );
       return new Program(idl as any, provider);
     } catch (e) {
       return null;
     }
-  }, [connection, wallet]);
+  }, [provider]);
 
   // Decode Escrow Status Enum
   const decodeStatus = (statusObj: any): EscrowStatusType => {
@@ -164,8 +174,39 @@ export default function Home() {
     );
   };
 
+    // Helper to detect "Blockhash not found" simulation / send errors
+  const isBlockhashNotFoundError = (err: any): boolean => {
+    const errorStr = [
+      err?.message,
+      err?.toString?.(),
+      typeof err === "string" ? err : "",
+      JSON.stringify(err?.logs || ""),
+      err?.error?.errorMessage,
+    ]
+      .filter(Boolean)
+      .join(" ");
+    return /blockhash not found/i.test(errorStr);
+  };
+
+  // Helper to execute transactions with 1 automatic retry specifically for "Blockhash not found"
+  const executeWithRetry = async (buildAndSend: () => Promise<string>): Promise<string> => {
+    try {
+      return await buildAndSend();
+    } catch (err: any) {
+      if (isBlockhashNotFoundError(err)) {
+        console.warn("Blockhash not found during simulation. Rebuilding transaction with fresh blockhash and retrying once...");
+        appendLog("Blockhash not found during simulation. Retrying with fresh blockhash...", "warn");
+        return await buildAndSend();
+      }
+      throw err;
+    }
+  };
+
   // Helper to parse anchor / RPC errors
   const parseError = (err: any): string => {
+    if (isBlockhashNotFoundError(err)) {
+      return "The network was slow, please try again.";
+    }
     if (err?.error?.errorMessage) return err.error.errorMessage;
     if (err?.message) {
       const match = err.message.match(/Error Message: (.*)/);
@@ -443,21 +484,23 @@ export default function Home() {
 
       appendLog(`Creating escrow agreement with ${searchedCounterparty.toBase58().slice(0, 8)}...`, "info");
 
-      const txSig = await (program.methods as any)
-        .createTradeEscrow(amountUnits, deadlineDuration)
-        .accounts({
-          buyer: publicKey,
-          seller: searchedCounterparty,
-          mint: DEFAULT_USDC_MINT,
-          escrow: escrowPda,
-          buyerTokenAccount: buyerAta,
-          escrowTokenAccount: vaultAta,
-          vault: vaultAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      const txSig = await executeWithRetry(() =>
+        (program.methods as any)
+          .createTradeEscrow(amountUnits, deadlineDuration)
+          .accounts({
+            buyer: publicKey,
+            seller: searchedCounterparty,
+            mint: DEFAULT_USDC_MINT,
+            escrow: escrowPda,
+            buyerTokenAccount: buyerAta,
+            escrowTokenAccount: vaultAta,
+            vault: vaultAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc()
+      );
 
       appendLog(`Escrow initialized on devnet — tx: ${txSig.slice(0, 8)}...`, "success", txSig);
 
@@ -486,13 +529,15 @@ export default function Home() {
 
       appendLog(`Submitting carrier tracking reference: "${trackingRefInput.trim()}"...`, "info");
 
-      const txSig = await (program.methods as any)
-        .confirmShipment(trackingRefInput.trim())
-        .accounts({
-          seller: publicKey,
-          escrow: activeEscrow.pda,
-        })
-        .rpc();
+      const txSig = await executeWithRetry(() =>
+        (program.methods as any)
+          .confirmShipment(trackingRefInput.trim())
+          .accounts({
+            seller: publicKey,
+            escrow: activeEscrow.pda,
+          })
+          .rpc()
+      );
 
       appendLog(`Shipment confirmed on devnet — tx: ${txSig.slice(0, 8)}...`, "success", txSig);
       setActiveEscrow((prev) =>
@@ -541,21 +586,23 @@ export default function Home() {
         DEFAULT_USDC_MINT
       );
 
-      const txSig = await (program.methods as any)
-        .releaseFunds()
-        .accounts({
-          buyer: publicKey,
-          seller: activeEscrow.seller,
-          mint: DEFAULT_USDC_MINT,
-          escrow: activeEscrow.pda,
-          escrowTokenAccount: vaultAta,
-          vault: vaultAta,
-          sellerTokenAccount: sellerAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-        })
-        .preInstructions([createSellerAtaIx])
-        .rpc();
+      const txSig = await executeWithRetry(() =>
+        (program.methods as any)
+          .releaseFunds()
+          .accounts({
+            buyer: publicKey,
+            seller: activeEscrow.seller,
+            mint: DEFAULT_USDC_MINT,
+            escrow: activeEscrow.pda,
+            escrowTokenAccount: vaultAta,
+            vault: vaultAta,
+            sellerTokenAccount: sellerAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .preInstructions([createSellerAtaIx])
+          .rpc()
+      );
 
       appendLog(`Funds released & rent reclaimed — tx: ${txSig.slice(0, 8)}...`, "success", txSig);
       setActiveEscrow((prev) => (prev ? { ...prev, status: "Released" } : null));
@@ -620,19 +667,21 @@ export default function Home() {
 
       appendLog(`Claiming expired escrow refund & reclaiming rent lamports...`, "info");
 
-      const txSig = await (program.methods as any)
-        .refundIfExpired()
-        .accounts({
-          buyer: publicKey,
-          mint: DEFAULT_USDC_MINT,
-          escrow: activeEscrow.pda,
-          escrowTokenAccount: vaultAta,
-          vault: vaultAta,
-          buyerTokenAccount: buyerAta,
-          tokenProgram: TOKEN_PROGRAM_ID,
-          systemProgram: SystemProgram.programId,
-        })
-        .rpc();
+      const txSig = await executeWithRetry(() =>
+        (program.methods as any)
+          .refundIfExpired()
+          .accounts({
+            buyer: publicKey,
+            mint: DEFAULT_USDC_MINT,
+            escrow: activeEscrow.pda,
+            escrowTokenAccount: vaultAta,
+            vault: vaultAta,
+            buyerTokenAccount: buyerAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
+            systemProgram: SystemProgram.programId,
+          })
+          .rpc()
+      );
 
       appendLog(`Escrow refunded & rent reclaimed — tx: ${txSig.slice(0, 8)}...`, "success", txSig);
       setActiveEscrow((prev) => (prev ? { ...prev, status: "Refunded" } : null));
@@ -655,14 +704,16 @@ export default function Home() {
     try {
       appendLog(`Invoking dispute instruction to freeze escrow vault...`, "warn");
 
-      const txSig = await (program.methods as any)
-        .raiseDispute()
-        .accounts({
-          signer: publicKey,
-          caller: publicKey,
-          escrow: activeEscrow.pda,
-        })
-        .rpc();
+      const txSig = await executeWithRetry(() =>
+        (program.methods as any)
+          .raiseDispute()
+          .accounts({
+            signer: publicKey,
+            caller: publicKey,
+            escrow: activeEscrow.pda,
+          })
+          .rpc()
+      );
 
       appendLog(`Escrow flagged as DISPUTED on devnet — tx: ${txSig.slice(0, 8)}...`, "warn", txSig);
       setActiveEscrow((prev) => (prev ? { ...prev, status: "Disputed" } : null));
