@@ -1,3 +1,6 @@
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import * as anchor from "@coral-xyz/anchor";
 import { Program } from "@coral-xyz/anchor";
 import { Tradebridge } from "../target/types/tradebridge";
@@ -19,6 +22,11 @@ describe("tradebridge escrow tests", () => {
 
   const program = anchor.workspace.Tradebridge as Program<Tradebridge>;
   const payer = (provider.wallet as anchor.Wallet).payer;
+
+  // Load designated arbiter keypair from ~/tradebridge-arbiter.json
+  const arbiterKeyPath = path.join(os.homedir(), "tradebridge-arbiter.json");
+  const arbiterKeyData = JSON.parse(fs.readFileSync(arbiterKeyPath, "utf-8"));
+  const arbiter = anchor.web3.Keypair.fromSecretKey(Uint8Array.from(arbiterKeyData));
 
   let mint: anchor.web3.PublicKey;
 
@@ -117,6 +125,17 @@ describe("tradebridge escrow tests", () => {
   };
 
   before(async () => {
+    // Fund arbiter keypair on the test validator
+    const airdropArbiter = await provider.connection.requestAirdrop(
+      arbiter.publicKey,
+      2 * anchor.web3.LAMPORTS_PER_SOL
+    );
+    const latestBh = await provider.connection.getLatestBlockhash();
+    await provider.connection.confirmTransaction({
+      signature: airdropArbiter,
+      ...latestBh,
+    });
+
     // Create test SPL Token Mint (decimals: 6, representing USDC)
     mint = await createMint(
       provider.connection,
@@ -664,5 +683,421 @@ describe("tradebridge escrow tests", () => {
     expect(finalEscrow.status.disputed).to.not.be.undefined;
     const finalVault = await getAccount(provider.connection, escrowAta);
     expect(Number(finalVault.amount)).to.equal(escrowAmount.toNumber());
+  });
+
+
+  // =========================================================================
+  // DISPUTE RESOLUTION TESTS (Step 3 a-e)
+  // =========================================================================
+
+  // -------------------------------------------------------------------------
+  // TEST 9: Arbiter Resolves Dispute to Seller (3a)
+  // -------------------------------------------------------------------------
+  it("9. (3a) Arbiter resolves dispute to seller: seller balance +amount, escrow and vault closed", async () => {
+    const { buyer, seller, buyerAta, sellerAta } = await setupBuyerAndSeller();
+    const { escrowPda, escrowAta } = getEscrowPdaAndAta(buyer.publicKey, seller.publicKey, mint);
+
+    const escrowAmount = new anchor.BN(40 * 1_000_000);
+    const now = await getOnChainTimestamp();
+    const deadline = new anchor.BN(now + 3600);
+
+    // Create escrow
+    await program.methods
+      .createTradeEscrow(escrowAmount, deadline)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        mint,
+        buyerTokenAccount: buyerAta,
+        escrow: escrowPda,
+        escrowTokenAccount: escrowAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // Confirm shipment
+    await program.methods
+      .confirmShipment("TRACK-ARBITER-SELLER")
+      .accountsPartial({
+        seller: seller.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([seller])
+      .rpc();
+
+    // Raise dispute
+    await program.methods
+      .raiseDispute()
+      .accountsPartial({
+        signer: buyer.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([buyer])
+      .rpc();
+
+    const initialSellerAccount = await getAccount(provider.connection, sellerAta);
+    const initialSellerBalance = Number(initialSellerAccount.amount);
+
+    // Arbiter resolves dispute: release to seller
+    await program.methods
+      .resolveDispute(true)
+      .accountsPartial({
+        arbiter: arbiter.publicKey,
+        buyer: buyer.publicKey,
+        escrow: escrowPda,
+        mint,
+        escrowTokenAccount: escrowAta,
+        buyerTokenAccount: buyerAta,
+        sellerTokenAccount: sellerAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([arbiter])
+      .rpc();
+
+    // Assert: seller balance +amount
+    const finalSellerAccount = await getAccount(provider.connection, sellerAta);
+    expect(Number(finalSellerAccount.amount)).to.equal(initialSellerBalance + escrowAmount.toNumber());
+
+    // Assert: escrow and vault closed
+    const closedEscrow = await program.account.tradeEscrow.fetchNullable(escrowPda);
+    expect(closedEscrow).to.be.null;
+
+    const closedVaultInfo = await provider.connection.getAccountInfo(escrowAta);
+    expect(closedVaultInfo).to.be.null;
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 10: Arbiter Refunds Buyer (3b)
+  // -------------------------------------------------------------------------
+  it("10. (3b) Arbiter refunds buyer: buyer balance restored, accounts closed", async () => {
+    const initialBuyerTokens = 1000 * 1_000_000;
+    const { buyer, seller, buyerAta, sellerAta } = await setupBuyerAndSeller(initialBuyerTokens);
+    const { escrowPda, escrowAta } = getEscrowPdaAndAta(buyer.publicKey, seller.publicKey, mint);
+
+    const escrowAmount = new anchor.BN(45 * 1_000_000);
+    const now = await getOnChainTimestamp();
+    const deadline = new anchor.BN(now + 3600);
+
+    // Create escrow
+    await program.methods
+      .createTradeEscrow(escrowAmount, deadline)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        mint,
+        buyerTokenAccount: buyerAta,
+        escrow: escrowPda,
+        escrowTokenAccount: escrowAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // Confirm shipment
+    await program.methods
+      .confirmShipment("TRACK-ARBITER-BUYER")
+      .accountsPartial({
+        seller: seller.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([seller])
+      .rpc();
+
+    // Raise dispute
+    await program.methods
+      .raiseDispute()
+      .accountsPartial({
+        signer: seller.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([seller])
+      .rpc();
+
+    // Arbiter resolves dispute: refund to buyer (release_to_seller = false)
+    await program.methods
+      .resolveDispute(false)
+      .accountsPartial({
+        arbiter: arbiter.publicKey,
+        buyer: buyer.publicKey,
+        escrow: escrowPda,
+        mint,
+        escrowTokenAccount: escrowAta,
+        buyerTokenAccount: buyerAta,
+        sellerTokenAccount: sellerAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([arbiter])
+      .rpc();
+
+    // Assert: buyer balance restored
+    const finalBuyerAccount = await getAccount(provider.connection, buyerAta);
+    expect(Number(finalBuyerAccount.amount)).to.equal(initialBuyerTokens);
+
+    // Assert: escrow and vault closed
+    const closedEscrow = await program.account.tradeEscrow.fetchNullable(escrowPda);
+    expect(closedEscrow).to.be.null;
+
+    const closedVaultInfo = await provider.connection.getAccountInfo(escrowAta);
+    expect(closedVaultInfo).to.be.null;
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 11: Non-arbiter Signer Fails (3c)
+  // -------------------------------------------------------------------------
+  it("11. (3c) Non-arbiter signer calling resolve_dispute fails with UnauthorizedArbiter", async () => {
+    const { buyer, seller, buyerAta, sellerAta } = await setupBuyerAndSeller();
+    const { escrowPda, escrowAta } = getEscrowPdaAndAta(buyer.publicKey, seller.publicKey, mint);
+
+    const escrowAmount = new anchor.BN(20 * 1_000_000);
+    const now = await getOnChainTimestamp();
+    const deadline = new anchor.BN(now + 3600);
+
+    await program.methods
+      .createTradeEscrow(escrowAmount, deadline)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        mint,
+        buyerTokenAccount: buyerAta,
+        escrow: escrowPda,
+        escrowTokenAccount: escrowAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    await program.methods
+      .confirmShipment("TRACK-FAKE-ARBITER")
+      .accountsPartial({
+        seller: seller.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([seller])
+      .rpc();
+
+    await program.methods
+      .raiseDispute()
+      .accountsPartial({
+        signer: buyer.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([buyer])
+      .rpc();
+
+    const impostor = anchor.web3.Keypair.generate();
+    const airdropImpostor = await provider.connection.requestAirdrop(
+      impostor.publicKey,
+      anchor.web3.LAMPORTS_PER_SOL
+    );
+    const impostorBh = await provider.connection.getLatestBlockhash();
+    await provider.connection.confirmTransaction({
+      signature: airdropImpostor,
+      ...impostorBh,
+    });
+
+    try {
+      await program.methods
+        .resolveDispute(true)
+        .accountsPartial({
+          arbiter: impostor.publicKey,
+          buyer: buyer.publicKey,
+          escrow: escrowPda,
+          mint,
+          escrowTokenAccount: escrowAta,
+          buyerTokenAccount: buyerAta,
+          sellerTokenAccount: sellerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([impostor])
+        .rpc();
+      expect.fail("Should have failed with UnauthorizedArbiter");
+    } catch (err: any) {
+      expect(err.toString()).to.include("UnauthorizedArbiter");
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 12: Resolve on Non-disputed Escrow Fails (3d)
+  // -------------------------------------------------------------------------
+  it("12. (3d) resolve_dispute on a non-disputed escrow fails with InvalidStatusForResolution", async () => {
+    const { buyer, seller, buyerAta, sellerAta } = await setupBuyerAndSeller();
+    const { escrowPda, escrowAta } = getEscrowPdaAndAta(buyer.publicKey, seller.publicKey, mint);
+
+    const escrowAmount = new anchor.BN(20 * 1_000_000);
+    const now = await getOnChainTimestamp();
+    const deadline = new anchor.BN(now + 3600);
+
+    await program.methods
+      .createTradeEscrow(escrowAmount, deadline)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        mint,
+        buyerTokenAccount: buyerAta,
+        escrow: escrowPda,
+        escrowTokenAccount: escrowAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // Escrow is in Created status (not Disputed)
+    try {
+      await program.methods
+        .resolveDispute(true)
+        .accountsPartial({
+          arbiter: arbiter.publicKey,
+          buyer: buyer.publicKey,
+          escrow: escrowPda,
+          mint,
+          escrowTokenAccount: escrowAta,
+          buyerTokenAccount: buyerAta,
+          sellerTokenAccount: sellerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([arbiter])
+        .rpc();
+      expect.fail("Should have failed with InvalidStatusForResolution");
+    } catch (err: any) {
+      expect(err.toString()).to.include("InvalidStatusForResolution");
+    }
+
+    // Now seller confirms shipment (status ShipmentConfirmed, still not Disputed)
+    await program.methods
+      .confirmShipment("TRACK-NON-DISPUTED")
+      .accountsPartial({
+        seller: seller.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([seller])
+      .rpc();
+
+    try {
+      await program.methods
+        .resolveDispute(false)
+        .accountsPartial({
+          arbiter: arbiter.publicKey,
+          buyer: buyer.publicKey,
+          escrow: escrowPda,
+          mint,
+          escrowTokenAccount: escrowAta,
+          buyerTokenAccount: buyerAta,
+          sellerTokenAccount: sellerAta,
+          tokenProgram: TOKEN_PROGRAM_ID,
+        })
+        .signers([arbiter])
+        .rpc();
+      expect.fail("Should have failed with InvalidStatusForResolution");
+    } catch (err: any) {
+      expect(err.toString()).to.include("InvalidStatusForResolution");
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // TEST 13: Same Buyer-Seller Pair Can Create New Escrow After Resolution (3e)
+  // -------------------------------------------------------------------------
+  it("13. (3e) After a resolution, the same buyer-seller pair can create a new escrow", async () => {
+    const { buyer, seller, buyerAta, sellerAta } = await setupBuyerAndSeller();
+    const { escrowPda, escrowAta } = getEscrowPdaAndAta(buyer.publicKey, seller.publicKey, mint);
+
+    const firstAmount = new anchor.BN(15 * 1_000_000);
+    const now1 = await getOnChainTimestamp();
+    const deadline1 = new anchor.BN(now1 + 3600);
+
+    // 1. Create first escrow
+    await program.methods
+      .createTradeEscrow(firstAmount, deadline1)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        mint,
+        buyerTokenAccount: buyerAta,
+        escrow: escrowPda,
+        escrowTokenAccount: escrowAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // 2. Confirm and dispute
+    await program.methods
+      .confirmShipment("TRACK-PAIR-REUSE-1")
+      .accountsPartial({
+        seller: seller.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([seller])
+      .rpc();
+
+    await program.methods
+      .raiseDispute()
+      .accountsPartial({
+        signer: buyer.publicKey,
+        escrow: escrowPda,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // 3. Resolve dispute (release to seller)
+    await program.methods
+      .resolveDispute(true)
+      .accountsPartial({
+        arbiter: arbiter.publicKey,
+        buyer: buyer.publicKey,
+        escrow: escrowPda,
+        mint,
+        escrowTokenAccount: escrowAta,
+        buyerTokenAccount: buyerAta,
+        sellerTokenAccount: sellerAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+      })
+      .signers([arbiter])
+      .rpc();
+
+    // Confirm escrow closed
+    let escrowAccount = await program.account.tradeEscrow.fetchNullable(escrowPda);
+    expect(escrowAccount).to.be.null;
+
+    // 4. Same buyer-seller pair creates second escrow with same PDA address
+    const secondAmount = new anchor.BN(25 * 1_000_000);
+    const now2 = await getOnChainTimestamp();
+    const deadline2 = new anchor.BN(now2 + 7200);
+
+    await program.methods
+      .createTradeEscrow(secondAmount, deadline2)
+      .accountsPartial({
+        buyer: buyer.publicKey,
+        seller: seller.publicKey,
+        mint,
+        buyerTokenAccount: buyerAta,
+        escrow: escrowPda,
+        escrowTokenAccount: escrowAta,
+        tokenProgram: TOKEN_PROGRAM_ID,
+        associatedTokenProgram: ASSOCIATED_TOKEN_PROGRAM_ID,
+        systemProgram: anchor.web3.SystemProgram.programId,
+      })
+      .signers([buyer])
+      .rpc();
+
+    // Assert second escrow exists and has status Created
+    escrowAccount = await program.account.tradeEscrow.fetch(escrowPda);
+    expect(escrowAccount.buyer.toBase58()).to.equal(buyer.publicKey.toBase58());
+    expect(escrowAccount.seller.toBase58()).to.equal(seller.publicKey.toBase58());
+    expect(escrowAccount.amount.toNumber()).to.equal(secondAmount.toNumber());
+    expect(escrowAccount.status.created).to.not.be.undefined;
+
+    const vaultAccount = await getAccount(provider.connection, escrowAta);
+    expect(Number(vaultAccount.amount)).to.equal(secondAmount.toNumber());
   });
 });

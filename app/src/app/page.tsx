@@ -45,6 +45,8 @@ const DEFAULT_USDC_MINT = parsePublicKey(
   "NEXT_PUBLIC_DEFAULT_USDC_MINT"
 );
 
+const ARBITER_PUBKEY = process.env.NEXT_PUBLIC_ARBITER || "78ubWYfiyGatWLPkmP7FkssbshanZ6vYyC1nf4KchmWr";
+
 export type EscrowStatusType =
   | "Created"
   | "ShipmentConfirmed"
@@ -92,6 +94,7 @@ export default function Home() {
   const { connection } = useConnection();
   const wallet = useWallet();
   const { publicKey, connected, connecting } = wallet;
+  const isArbiter = publicKey?.toBase58() === ARBITER_PUBKEY;
   const { activityFeed, appendLog } = useActivity();
 
   // Search & Lookup State
@@ -727,6 +730,83 @@ export default function Home() {
     }
   };
 
+  // 7. ARBITER RESOLVE DISPUTE
+  const handleResolveDispute = async (releaseToSeller: boolean) => {
+    if (!program || !publicKey || !activeEscrow) return;
+    setTxError(null);
+    setIsSubmitting(true);
+
+    try {
+      appendLog(
+        `Arbiter resolving dispute: ${releaseToSeller ? "releasing funds to seller" : "refunding funds to buyer"}...`,
+        "info"
+      );
+
+      const buyerAta = getAssociatedTokenAddressSync(
+        activeEscrow.mint,
+        activeEscrow.buyer,
+        false
+      );
+      const sellerAta = getAssociatedTokenAddressSync(
+        activeEscrow.mint,
+        activeEscrow.seller,
+        false
+      );
+      const vaultAta = getAssociatedTokenAddressSync(
+        activeEscrow.mint,
+        activeEscrow.pda,
+        true
+      );
+
+      // Idempotent ATA pre-instructions for both token accounts
+      const preInstructions = [
+        createAssociatedTokenAccountIdempotentInstruction(
+          publicKey,
+          buyerAta,
+          activeEscrow.buyer,
+          activeEscrow.mint
+        ),
+        createAssociatedTokenAccountIdempotentInstruction(
+          publicKey,
+          sellerAta,
+          activeEscrow.seller,
+          activeEscrow.mint
+        ),
+      ];
+
+      const txSig = await executeWithRetry(() =>
+        (program.methods as any)
+          .resolveDispute(releaseToSeller)
+          .accounts({
+            arbiter: publicKey,
+            buyer: activeEscrow.buyer,
+            escrow: activeEscrow.pda,
+            mint: activeEscrow.mint,
+            escrowTokenAccount: vaultAta,
+            buyerTokenAccount: buyerAta,
+            sellerTokenAccount: sellerAta,
+            tokenProgram: TOKEN_PROGRAM_ID,
+          })
+          .preInstructions(preInstructions)
+          .rpc()
+      );
+
+      appendLog(
+        `Dispute resolved (${releaseToSeller ? "released to seller" : "refunded to buyer"}) & accounts closed — tx: ${txSig.slice(0, 8)}...`,
+        "success",
+        txSig
+      );
+      setActiveEscrow(null);
+    } catch (err: any) {
+      console.error("Resolve dispute error:", err);
+      const msg = parseError(err);
+      setTxError(msg);
+      appendLog(`Dispute resolution failed: ${msg}`, "error");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   const deadlineSec = activeEscrow ? safeBnToNumber(activeEscrow.deadline) : 0;
   const deadlineDate = activeEscrow && deadlineSec > 0 ? new Date(deadlineSec * 1000) : null;
   const isExpired = activeEscrow && deadlineSec > 0 ? Date.now() / 1000 > deadlineSec : false;
@@ -1180,9 +1260,52 @@ export default function Home() {
                   </div>
                 )}
 
-                {["Released", "Refunded", "Disputed"].includes(activeEscrow.status) && (
+                {["Released", "Refunded"].includes(activeEscrow.status) && (
                   <div className="mt-5 rounded-xl bg-slate-100 p-4 text-sm text-slate-600 dark:bg-[#212121] dark:text-[#9ba1b0]">
                     This agreement is terminal and settled.
+                  </div>
+                )}
+
+                {activeEscrow.status === "Disputed" && (
+                  <div className="mt-5">
+                    {isArbiter ? (
+                      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                        <button
+                          id="resolve-to-seller-btn"
+                          onClick={() => handleResolveDispute(true)}
+                          disabled={isSubmitting}
+                          className="tb-button bg-[#35a66f] text-white hover:bg-emerald-600 transition"
+                        >
+                          {isSubmitting ? (
+                            <span className="inline-flex items-center gap-2">
+                              <RotatingLogoSpinner size={16} />
+                              <span>Confirming…</span>
+                            </span>
+                          ) : (
+                            "Release to seller"
+                          )}
+                        </button>
+                        <button
+                          id="refund-to-buyer-btn"
+                          onClick={() => handleResolveDispute(false)}
+                          disabled={isSubmitting}
+                          className="tb-button bg-amber-500/15 text-[#c88a2d] hover:bg-amber-500/25 transition"
+                        >
+                          {isSubmitting ? (
+                            <span className="inline-flex items-center gap-2">
+                              <RotatingLogoSpinner size={16} />
+                              <span>Confirming…</span>
+                            </span>
+                          ) : (
+                            "Refund to buyer"
+                          )}
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-4 text-sm text-amber-600 dark:text-amber-400">
+                        Awaiting arbiter resolution
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

@@ -32,6 +32,7 @@ Nigerian SME exporters selling to buyers abroad face a trust deadlock — the bu
 | **Create escrow ($250)** | [`4WRC4qzzLrgH8Hzc9z4KJdgrCxR33Phbi8AhsauToXNsNJcCqFgoQrRQq6jNaNvfFJpxtcx8CvNuEEMDBue4gw11`](https://explorer.solana.com/tx/4WRC4qzzLrgH8Hzc9z4KJdgrCxR33Phbi8AhsauToXNsNJcCqFgoQrRQq6jNaNvfFJpxtcx8CvNuEEMDBue4gw11?cluster=devnet) |
 | **Confirm shipment** | [`4ZBXnrYPKtckWj8k1Uv65a2xW3YCi6kCj5cq7tpaDBE3VkYvRu93k9C9E67iMDRdH9WzR9skepkBxBVFgbUTMJmD`](https://explorer.solana.com/tx/4ZBXnrYPKtckWj8k1Uv65a2xW3YCi6kCj5cq7tpaDBE3VkYvRu93k9C9E67iMDRdH9WzR9skepkBxBVFgbUTMJmD?cluster=devnet) |
 | **Release funds** (escrow + vault accounts closed, rent reclaimed) | [`3P4aeoAmybsEbEFTXcvrEoybJjqc1ZTg4L7vjvzvEwq2tvR1oFBBk4weDU4gxsaywezJJeYLUprSDMWQJQBQPLuw`](https://explorer.solana.com/tx/3P4aeoAmybsEbEFTXcvrEoybJjqc1ZTg4L7vjvzvEwq2tvR1oFBBk4weDU4gxsaywezJJeYLUprSDMWQJQBQPLuw?cluster=devnet) |
+| **Resolve dispute (refund to buyer)** (escrow + vault accounts closed, rent reclaimed) | [`2fRZjNgJ9oejyxhEpUUvGV2nAXeWSDftCqtWxssUYLPAsvWjXknmFiZZssK3M2jQ65zmvdQRQmTzvxaaMxLf2g7G`](https://explorer.solana.com/tx/2fRZjNgJ9oejyxhEpUUvGV2nAXeWSDftCqtWxssUYLPAsvWjXknmFiZZssK3M2jQ65zmvdQRQmTzvxaaMxLf2g7G?cluster=devnet) |
 
 > The full create ? confirm ? release flow was also verified manually through the web UI with two real Phantom wallets on devnet.
 
@@ -83,7 +84,13 @@ TradeBridge models the bilateral physical trade lifecycle as a deterministic on-
                                         ?                                         ?
                               +------------------+                      +------------------+
                               |     Released     |                      |     Disputed     |
-                              +------------------+                      |  (Funds frozen)  |
+                              +------------------+                      +------------------+
+                                                                                  |
+                                                                    [ Arbiter resolves dispute ]
+                                                                                  |
+                                                                                  v
+                                                                        +------------------+
+                                                                        | Resolved (Closed)|
                                                                         +------------------+
 ```
 
@@ -114,8 +121,8 @@ For the full architectural analysis and trade-off matrix, see [design/DESIGN_DEC
 
 ## Known Limitations (v1)
 
-- **No timeout release:** If the buyer never releases after shipment is confirmed, funds stay locked (planned: auto-release after N days if no dispute).
-- **Disputed escrows:** Disputed escrows are frozen with no on-chain resolution instruction (planned: designated arbiter / `resolve_dispute`).
+- **No timeout release (not implemented):** Auto-release after a timeout is still not implemented. If the buyer never releases after shipment is confirmed, funds remain locked until manually released or disputed (planned: crank-based auto-release after N days if no dispute).
+- **Dispute arbitration trust point:** v1 uses a single designated arbiter set at compile time (`resolve_dispute`), acting as a centralized trust point in the dispute path only (planned: per-escrow designated arbiter, multisig arbitration, or decentralized dispute resolution).
 - **Single active agreement per pair:** One active escrow per buyer–seller pair (PDA seeds are `[escrow, buyer, seller]`).
 - **Unverified tracking input:** Tracking reference is unverified free text (planned: carrier oracle or logistics attestation, see design decisions above).
 - **Devnet scope:** Uses a devnet test USDC mint; unaudited; not for mainnet use.
@@ -137,6 +144,7 @@ For the full architectural analysis and trade-off matrix, see [design/DESIGN_DEC
 | `release_funds` | Buyer | `ShipmentConfirmed` | Releases vault tokens to seller token account using PDA signer seeds; reclaims rent. |
 | `refund_if_expired` | Buyer | `Created` (Post-deadline) | Returns locked tokens to buyer if seller failed to ship before deadline; reclaims rent. |
 | `raise_dispute` | Buyer or Seller | `ShipmentConfirmed` | Transitions status to `Disputed`, freezing all token transfers and emitting an event. |
+| `resolve_dispute` | Arbiter | `Disputed` | Designated arbiter resolves dispute by releasing tokens to seller or refunding buyer; closes vault and escrow PDA, returning rent to buyer. |
 
 ---
 
@@ -149,7 +157,9 @@ tradebridge/
 |       +-- src/
 |           +-- lib.rs             # Anchor program source code
 +-- tests/
-|   +-- tradebridge.ts            # Integration test suite (8 tests)
+|   +-- tradebridge.ts            # Integration test suite (13 tests)
++-- scripts/
+|   +-- resolve-dispute.ts        # CLI tool for arbiter dispute resolution
 +-- scripts/
 |   +-- scenario-runner.ts        # 4 narrated B2B trade simulation scenarios
 |   +-- devnet-demo.ts            # Live Devnet deployment & execution demo

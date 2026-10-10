@@ -679,6 +679,198 @@
         }
       ],
       "args": []
+    },
+    {
+      "name": "resolve_dispute",
+      "docs": [
+        "6. resolve_dispute:",
+        "- Called by the designated arbiter to resolve an escrow in Disputed status.",
+        "- If release_to_seller is true, transfers full amount to seller_token_account.",
+        "- If release_to_seller is false, refunds full amount to buyer_token_account.",
+        "- Closes the vault token account and the escrow account, returning rent to buyer.",
+        "- Emits DisputeResolved event."
+      ],
+      "discriminator": [
+        231,
+        6,
+        202,
+        6,
+        96,
+        103,
+        12,
+        230
+      ],
+      "accounts": [
+        {
+          "name": "arbiter",
+          "docs": [
+            "Must be the compile-time designated arbiter."
+          ],
+          "signer": true
+        },
+        {
+          "name": "buyer",
+          "docs": [
+            "The buyer account receiving rent reclaimed from closing the escrow PDA and vault ATA."
+          ],
+          "writable": true
+        },
+        {
+          "name": "escrow",
+          "docs": [
+            "The Escrow state PDA, closed and rent returned to the buyer upon resolution."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "const",
+                "value": [
+                  101,
+                  115,
+                  99,
+                  114,
+                  111,
+                  119
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "escrow.buyer",
+                "account": "TradeEscrow"
+              },
+              {
+                "kind": "account",
+                "path": "escrow.seller",
+                "account": "TradeEscrow"
+              }
+            ]
+          }
+        },
+        {
+          "name": "mint",
+          "docs": [
+            "Token mint of the held assets."
+          ]
+        },
+        {
+          "name": "escrow_token_account",
+          "docs": [
+            "The escrow PDA's token vault holding the tokens."
+          ],
+          "writable": true,
+          "pda": {
+            "seeds": [
+              {
+                "kind": "account",
+                "path": "escrow"
+              },
+              {
+                "kind": "const",
+                "value": [
+                  6,
+                  221,
+                  246,
+                  225,
+                  215,
+                  101,
+                  161,
+                  147,
+                  217,
+                  203,
+                  225,
+                  70,
+                  206,
+                  235,
+                  121,
+                  172,
+                  28,
+                  180,
+                  133,
+                  237,
+                  95,
+                  91,
+                  55,
+                  145,
+                  58,
+                  140,
+                  245,
+                  133,
+                  126,
+                  255,
+                  0,
+                  169
+                ]
+              },
+              {
+                "kind": "account",
+                "path": "mint"
+              }
+            ],
+            "program": {
+              "kind": "const",
+              "value": [
+                140,
+                151,
+                37,
+                143,
+                78,
+                36,
+                137,
+                241,
+                187,
+                61,
+                16,
+                41,
+                20,
+                142,
+                13,
+                131,
+                11,
+                90,
+                19,
+                153,
+                218,
+                255,
+                16,
+                132,
+                4,
+                142,
+                123,
+                216,
+                219,
+                233,
+                248,
+                89
+              ]
+            }
+          }
+        },
+        {
+          "name": "buyer_token_account",
+          "docs": [
+            "The buyer's token account receiving refunded funds if released to buyer."
+          ],
+          "writable": true
+        },
+        {
+          "name": "seller_token_account",
+          "docs": [
+            "The seller's token account receiving funds if released to seller."
+          ],
+          "writable": true
+        },
+        {
+          "name": "token_program",
+          "address": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
+        }
+      ],
+      "args": [
+        {
+          "name": "release_to_seller",
+          "type": "bool"
+        }
+      ]
     }
   ],
   "accounts": [
@@ -708,6 +900,19 @@
         45,
         38,
         176
+      ]
+    },
+    {
+      "name": "DisputeResolved",
+      "discriminator": [
+        121,
+        64,
+        249,
+        153,
+        139,
+        128,
+        236,
+        187
       ]
     }
   ],
@@ -796,6 +1001,16 @@
       "code": 6016,
       "name": "EscrowDisputed",
       "msg": "Escrow is disputed and all funds actions are frozen pending resolution."
+    },
+    {
+      "code": 6017,
+      "name": "UnauthorizedArbiter",
+      "msg": "Signer is not authorized: only the designated arbiter can resolve disputes."
+    },
+    {
+      "code": 6018,
+      "name": "InvalidStatusForResolution",
+      "msg": "Escrow must be in Disputed status to be resolved."
     }
   ],
   "types": [
@@ -822,6 +1037,37 @@
           {
             "name": "amount",
             "type": "u64"
+          }
+        ]
+      }
+    },
+    {
+      "name": "DisputeResolved",
+      "docs": [
+        "Event emitted when a dispute is resolved by the arbiter."
+      ],
+      "type": {
+        "kind": "struct",
+        "fields": [
+          {
+            "name": "escrow",
+            "type": "pubkey"
+          },
+          {
+            "name": "buyer",
+            "type": "pubkey"
+          },
+          {
+            "name": "seller",
+            "type": "pubkey"
+          },
+          {
+            "name": "amount",
+            "type": "u64"
+          },
+          {
+            "name": "released_to_seller",
+            "type": "bool"
           }
         ]
       }

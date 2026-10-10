@@ -4,6 +4,9 @@ use anchor_spl::token::{self, Mint, Token, TokenAccount};
 
 declare_id!("3dmv4RrSanjP9Qdaj4E3D9ra9YNJrDg4QZP9sCmaK81v");
 
+/// Compile-time designated arbiter public key for resolving disputes.
+pub const ARBITER: Pubkey = pubkey!("78ubWYfiyGatWLPkmP7FkssbshanZ6vYyC1nf4KchmWr");
+
 #[program]
 pub mod tradebridge {
     use super::*;
@@ -285,6 +288,90 @@ pub mod tradebridge {
 
         Ok(())
     }
+
+    /// 6. resolve_dispute:
+    ///    - Called by the designated arbiter to resolve an escrow in Disputed status.
+    ///    - If release_to_seller is true, transfers full amount to seller_token_account.
+    ///    - If release_to_seller is false, refunds full amount to buyer_token_account.
+    ///    - Closes the vault token account and the escrow account, returning rent to buyer.
+    ///    - Emits DisputeResolved event.
+    pub fn resolve_dispute(
+        ctx: Context<ResolveDispute>,
+        release_to_seller: bool,
+    ) -> Result<()> {
+        let escrow = &ctx.accounts.escrow;
+
+        // Validation: Escrow must be in Disputed status
+        require!(
+            escrow.status == EscrowStatus::Disputed,
+            TradeBridgeError::InvalidStatusForResolution
+        );
+
+        // Copy needed fields into locals before CPIs
+        let escrow_key = escrow.key();
+        let buyer_key = escrow.buyer;
+        let seller_key = escrow.seller;
+        let bump = escrow.bump;
+        let amount = escrow.amount;
+
+        let signer_seeds: &[&[&[u8]]] = &[&[
+            b"escrow",
+            buyer_key.as_ref(),
+            seller_key.as_ref(),
+            &[bump],
+        ]];
+
+        let destination = if release_to_seller {
+            ctx.accounts.seller_token_account.to_account_info()
+        } else {
+            ctx.accounts.buyer_token_account.to_account_info()
+        };
+
+        // Transfer full amount from escrow vault to destination
+        token::transfer(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::Transfer {
+                    from: ctx.accounts.escrow_token_account.to_account_info(),
+                    to: destination,
+                    authority: ctx.accounts.escrow.to_account_info(),
+                },
+                signer_seeds,
+            ),
+            amount,
+        )?;
+
+        // Close vault token account and return rent to buyer
+        token::close_account(
+            CpiContext::new_with_signer(
+                ctx.accounts.token_program.to_account_info(),
+                token::CloseAccount {
+                    account: ctx.accounts.escrow_token_account.to_account_info(),
+                    destination: ctx.accounts.buyer.to_account_info(),
+                    authority: ctx.accounts.escrow.to_account_info(),
+                },
+                signer_seeds,
+            ),
+        )?;
+
+        // Emit DisputeResolved event
+        emit!(DisputeResolved {
+            escrow: escrow_key,
+            buyer: buyer_key,
+            seller: seller_key,
+            amount,
+            released_to_seller: release_to_seller,
+        });
+
+        msg!(
+            "Dispute resolved for escrow {}: release_to_seller={}, amount={}",
+            escrow_key,
+            release_to_seller,
+            amount
+        );
+
+        Ok(())
+    }
 }
 
 // ==============================================================================
@@ -455,6 +542,65 @@ pub struct RaiseDispute<'info> {
     pub escrow: Account<'info, TradeEscrow>,
 }
 
+/// Context for designated arbiter resolving a disputed escrow.
+#[derive(Accounts)]
+pub struct ResolveDispute<'info> {
+    /// Must be the compile-time designated arbiter.
+    #[account(
+        constraint = arbiter.key() == ARBITER @ TradeBridgeError::UnauthorizedArbiter,
+    )]
+    pub arbiter: Signer<'info>,
+
+    /// The buyer account receiving rent reclaimed from closing the escrow PDA and vault ATA.
+    /// CHECK: Validated against escrow.buyer constraint.
+    #[account(
+        mut,
+        constraint = buyer.key() == escrow.buyer @ TradeBridgeError::UnauthorizedBuyer,
+    )]
+    pub buyer: AccountInfo<'info>,
+
+    /// The Escrow state PDA, closed and rent returned to the buyer upon resolution.
+    #[account(
+        mut,
+        close = buyer,
+        seeds = [b"escrow", escrow.buyer.as_ref(), escrow.seller.as_ref()],
+        bump = escrow.bump,
+    )]
+    pub escrow: Account<'info, TradeEscrow>,
+
+    /// Token mint of the held assets.
+    #[account(
+        constraint = mint.key() == escrow.mint @ TradeBridgeError::InvalidTokenMint,
+    )]
+    pub mint: Account<'info, Mint>,
+
+    /// The escrow PDA's token vault holding the tokens.
+    #[account(
+        mut,
+        associated_token::mint = mint,
+        associated_token::authority = escrow,
+    )]
+    pub escrow_token_account: Account<'info, TokenAccount>,
+
+    /// The buyer's token account receiving refunded funds if released to buyer.
+    #[account(
+        mut,
+        constraint = buyer_token_account.owner == escrow.buyer @ TradeBridgeError::InvalidBuyerTokenAccount,
+        constraint = buyer_token_account.mint == mint.key() @ TradeBridgeError::InvalidTokenMint,
+    )]
+    pub buyer_token_account: Account<'info, TokenAccount>,
+
+    /// The seller's token account receiving funds if released to seller.
+    #[account(
+        mut,
+        constraint = seller_token_account.owner == escrow.seller @ TradeBridgeError::InvalidSellerTokenAccount,
+        constraint = seller_token_account.mint == mint.key() @ TradeBridgeError::InvalidTokenMint,
+    )]
+    pub seller_token_account: Account<'info, TokenAccount>,
+
+    pub token_program: Program<'info, Token>,
+}
+
 // ==============================================================================
 // STATE ACCOUNT, EVENTS, AND ENUMS
 // ==============================================================================
@@ -505,6 +651,16 @@ pub struct DisputeRaised {
     pub buyer: Pubkey,
     pub seller: Pubkey,
     pub amount: u64,
+}
+
+/// Event emitted when a dispute is resolved by the arbiter.
+#[event]
+pub struct DisputeResolved {
+    pub escrow: Pubkey,
+    pub buyer: Pubkey,
+    pub seller: Pubkey,
+    pub amount: u64,
+    pub released_to_seller: bool,
 }
 
 // ==============================================================================
@@ -563,4 +719,10 @@ pub enum TradeBridgeError {
 
     #[msg("Escrow is disputed and all funds actions are frozen pending resolution.")]
     EscrowDisputed,
+
+    #[msg("Signer is not authorized: only the designated arbiter can resolve disputes.")]
+    UnauthorizedArbiter,
+
+    #[msg("Escrow must be in Disputed status to be resolved.")]
+    InvalidStatusForResolution,
 }
