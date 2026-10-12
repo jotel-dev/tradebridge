@@ -1,0 +1,24 @@
+{
+  "name": "tradebridge-demo-video",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "start": "remotion preview src/index.ts",
+    "preview": "remotion preview src/index.ts",
+    "build:test": "remotion render src/index.ts TestRender renders/test-render.mp4 --concurrency=2",
+    "build:preview": "remotion render src/index.ts TradeBridgeDemo renders/tradebridge-demo-preview.mp4 --scale=0.5 --concurrency=2",
+    "build": "remotion render src/index.ts TradeBridgeDemo renders/tradebridge-demo.mp4 --concurrency=2",
+    "build:full": "remotion render src/index.ts TradeBridgeDemo renders/tradebridge-demo-1080p.mp4 --concurrency=2"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "remotion": "^4.0.260"
+  },
+  "devDependencies": {
+    "@remotion/cli": "^4.0.260",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "typescript": "^5.7.3"
+  }
+}
